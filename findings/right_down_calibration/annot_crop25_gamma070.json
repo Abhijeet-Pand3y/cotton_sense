@@ -1,0 +1,12 @@
+{
+ "gamma": 0.7,
+ "C": -1.4611368851587763,
+ "scale": 0.23197239878243503,
+ "n_bolls": 13,
+ "n_instances": 1269,
+ "loo_mean_abs_err_pct": 21.07,
+ "note": "size_mm = tb_px * z_raw**(1/gamma) * exp(C); z_raw is raw DA3, no focal",
+ "fitted_on": "data/annotations/right_down/right_down.xml",
+ "gamma_source": "FIXED at left_down's value; right_down cannot identify gamma itself",
+ "depth_variant": "top 1328px cropped"
+}

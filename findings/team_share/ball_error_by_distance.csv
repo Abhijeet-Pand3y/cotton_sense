@@ -1,0 +1,10 @@
+band,scenario,n,mean_size_error_pct
+all balls 9–29 in (23–74 cm),nothing of known size,116,16.99
+all balls 9–29 in (23–74 cm),one object of known size,302,8.86
+all balls 9–29 in (23–74 cm),several objects of known size,95,6.41
+beyond 11 in (> 28 cm),nothing of known size,90,16.07
+beyond 11 in (> 28 cm),one object of known size,198,8.62
+beyond 11 in (> 28 cm),several objects of known size,68,5.75
+beyond 21 in (> 53 cm),nothing of known size,53,14.69
+beyond 21 in (> 53 cm),one object of known size,64,10.23
+beyond 21 in (> 53 cm),several objects of known size,37,7.26

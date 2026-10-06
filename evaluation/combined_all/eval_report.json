@@ -1,0 +1,266 @@
+{
+  "__all__": {
+    "detection": {
+      "gt_instances": 285,
+      "predicted": 331,
+      "matched_iou50": 280,
+      "recall_iou50": 0.9824561403508771,
+      "precision_iou50": 0.8459214501510574,
+      "mean_box_iou_matched": 0.829521894454956,
+      "mean_mask_iou_matched": 0.846304907691335
+    },
+    "tip": {
+      "n": 272,
+      "mean_pixel_error": 63.68962785837698,
+      "median_pixel_error": 14.218319505503569,
+      "mean_normalized_error": 0.24264484637112282,
+      "median_normalized_error": 0.05982758019629478,
+      "mean_confidence": 0.814505114357042,
+      "median_confidence": 0.9448844492435455,
+      "pck": {
+        "pck@5px": 0.058823529411764705,
+        "pck@10px": 0.2536764705882353,
+        "pck@20px": 0.6801470588235294,
+        "pck@5pct_diag": 0.3713235294117647,
+        "pck@10pct_diag": 0.7352941176470589,
+        "pck@20pct_diag": 0.7610294117647058
+      },
+      "calibration": {
+        "err_top_quartile_conf": 12.683824435010287,
+        "err_bottom_quartile_conf": 173.71454397310967
+      }
+    },
+    "base": {
+      "n": 205,
+      "mean_pixel_error": 15.360407968271046,
+      "median_pixel_error": 14.68679040839082,
+      "mean_normalized_error": 0.06030718737379739,
+      "median_normalized_error": 0.059546124411762325,
+      "mean_confidence": 0.9270420610904694,
+      "median_confidence": 0.961058497428894,
+      "pck": {
+        "pck@5px": 0.04878048780487805,
+        "pck@10px": 0.23414634146341465,
+        "pck@20px": 0.7365853658536585,
+        "pck@5pct_diag": 0.36585365853658536,
+        "pck@10pct_diag": 0.9463414634146341,
+        "pck@20pct_diag": 1.0
+      },
+      "calibration": {
+        "err_top_quartile_conf": 16.758243568671293,
+        "err_bottom_quartile_conf": 14.573510027721836
+      }
+    },
+    "occlusion": {
+      "n": 280,
+      "binary_accuracy": 0.9285714285714286,
+      "confusion": {
+        "tp": 119,
+        "tn": 141,
+        "fp": 5,
+        "fn": 15
+      },
+      "precision": 0.9596774193548387,
+      "recall": 0.8880597014925373,
+      "pct_mae_on_occluded": 0.09112688408427246
+    }
+  },
+  "right_down": {
+    "detection": {
+      "gt_instances": 240,
+      "predicted": 278,
+      "matched_iou50": 238,
+      "recall_iou50": 0.9916666666666667,
+      "precision_iou50": 0.8561151079136691,
+      "mean_box_iou_matched": 0.8227375745773315,
+      "mean_mask_iou_matched": 0.8452020244233852
+    },
+    "tip": {
+      "n": 238,
+      "mean_pixel_error": 70.8640712892053,
+      "median_pixel_error": 14.927127140556014,
+      "mean_normalized_error": 0.26846313952637196,
+      "median_normalized_error": 0.0610894658642633,
+      "mean_confidence": 0.8012264200306239,
+      "median_confidence": 0.934114933013916,
+      "pck": {
+        "pck@5px": 0.03361344537815126,
+        "pck@10px": 0.2184873949579832,
+        "pck@20px": 0.6428571428571429,
+        "pck@5pct_diag": 0.3445378151260504,
+        "pck@10pct_diag": 0.7058823529411765,
+        "pck@20pct_diag": 0.7310924369747899
+      },
+      "calibration": {
+        "err_top_quartile_conf": 12.37139124449306,
+        "err_bottom_quartile_conf": 175.2372930505683
+      }
+    },
+    "base": {
+      "n": 178,
+      "mean_pixel_error": 16.129976391537163,
+      "median_pixel_error": 15.90613022232187,
+      "mean_normalized_error": 0.06289135369367749,
+      "median_normalized_error": 0.06219711788310072,
+      "mean_confidence": 0.9264336548159632,
+      "median_confidence": 0.9640878438949585,
+      "pck": {
+        "pck@5px": 0.016853932584269662,
+        "pck@10px": 0.1797752808988764,
+        "pck@20px": 0.702247191011236,
+        "pck@5pct_diag": 0.3202247191011236,
+        "pck@10pct_diag": 0.9438202247191011,
+        "pck@20pct_diag": 1.0
+      },
+      "calibration": {
+        "err_top_quartile_conf": 18.077510757013602,
+        "err_bottom_quartile_conf": 14.63378996359786
+      }
+    },
+    "occlusion": {
+      "n": 238,
+      "binary_accuracy": 0.9243697478991597,
+      "confusion": {
+        "tp": 105,
+        "tn": 115,
+        "fp": 3,
+        "fn": 15
+      },
+      "precision": 0.9722222222222222,
+      "recall": 0.875,
+      "pct_mae_on_occluded": 0.0872044652416591
+    }
+  },
+  "front_down": {
+    "detection": {
+      "gt_instances": 23,
+      "predicted": 27,
+      "matched_iou50": 20,
+      "recall_iou50": 0.8695652173913043,
+      "precision_iou50": 0.7407407407407407,
+      "mean_box_iou_matched": 0.8469828367233276,
+      "mean_mask_iou_matched": 0.8239711463924018
+    },
+    "tip": {
+      "n": 19,
+      "mean_pixel_error": 16.109994273392488,
+      "median_pixel_error": 9.979737283616467,
+      "mean_normalized_error": 0.07731335656684274,
+      "median_normalized_error": 0.050637040666818574,
+      "mean_confidence": 0.8593849210362685,
+      "median_confidence": 0.9131780862808228,
+      "pck": {
+        "pck@5px": 0.2631578947368421,
+        "pck@10px": 0.5263157894736842,
+        "pck@20px": 0.8947368421052632,
+        "pck@5pct_diag": 0.47368421052631576,
+        "pck@10pct_diag": 0.8947368421052632,
+        "pck@20pct_diag": 0.9473684210526315
+      },
+      "calibration": {
+        "err_top_quartile_conf": 8.364858685971418,
+        "err_bottom_quartile_conf": 23.441817155460846
+      }
+    },
+    "base": {
+      "n": 11,
+      "mean_pixel_error": 9.261224275529154,
+      "median_pixel_error": 7.89164273139641,
+      "mean_normalized_error": 0.0390693956905347,
+      "median_normalized_error": 0.037506902853657126,
+      "mean_confidence": 0.9020492055199363,
+      "median_confidence": 0.9324989914894104,
+      "pck": {
+        "pck@5px": 0.36363636363636365,
+        "pck@10px": 0.5454545454545454,
+        "pck@20px": 1.0,
+        "pck@5pct_diag": 0.6363636363636364,
+        "pck@10pct_diag": 1.0,
+        "pck@20pct_diag": 1.0
+      },
+      "calibration": {
+        "err_top_quartile_conf": 13.866447335364253,
+        "err_bottom_quartile_conf": 7.236331921519809
+      }
+    },
+    "occlusion": {
+      "n": 20,
+      "binary_accuracy": 0.9,
+      "confusion": {
+        "tp": 9,
+        "tn": 9,
+        "fp": 2,
+        "fn": 0
+      },
+      "precision": 0.8181818181818182,
+      "recall": 1.0,
+      "pct_mae_on_occluded": 0.1516990572132605
+    }
+  },
+  "back_down": {
+    "detection": {
+      "gt_instances": 22,
+      "predicted": 26,
+      "matched_iou50": 22,
+      "recall_iou50": 1.0,
+      "precision_iou50": 0.8461538461538461,
+      "mean_box_iou_matched": 0.8870429396629333,
+      "mean_mask_iou_matched": 0.8785395187709121
+    },
+    "tip": {
+      "n": 15,
+      "mean_pixel_error": 10.122661296881207,
+      "median_pixel_error": 10.315614681151859,
+      "mean_normalized_error": 0.042414482059924825,
+      "median_normalized_error": 0.04123737907600057,
+      "mean_confidence": 0.9683459758758545,
+      "median_confidence": 0.9746326804161072,
+      "pck": {
+        "pck@5px": 0.2,
+        "pck@10px": 0.4666666666666667,
+        "pck@20px": 1.0,
+        "pck@5pct_diag": 0.6666666666666666,
+        "pck@10pct_diag": 1.0,
+        "pck@20pct_diag": 1.0
+      },
+      "calibration": {
+        "err_top_quartile_conf": 6.638042941901685,
+        "err_bottom_quartile_conf": 8.506475498503086
+      }
+    },
+    "base": {
+      "n": 16,
+      "mean_pixel_error": 10.99214804819559,
+      "median_pixel_error": 9.01970424897903,
+      "mean_normalized_error": 0.04615931884737446,
+      "median_normalized_error": 0.038474192422720294,
+      "mean_confidence": 0.9509931690990925,
+      "median_confidence": 0.9661408960819244,
+      "pck": {
+        "pck@5px": 0.1875,
+        "pck@10px": 0.625,
+        "pck@20px": 0.9375,
+        "pck@5pct_diag": 0.6875,
+        "pck@10pct_diag": 0.9375,
+        "pck@20pct_diag": 1.0
+      },
+      "calibration": {
+        "err_top_quartile_conf": 8.26420576926283,
+        "err_bottom_quartile_conf": 14.568548860455616
+      }
+    },
+    "occlusion": {
+      "n": 22,
+      "binary_accuracy": 1.0,
+      "confusion": {
+        "tp": 5,
+        "tn": 17,
+        "fp": 0,
+        "fn": 0
+      },
+      "precision": 1.0,
+      "recall": 1.0,
+      "pct_mae_on_occluded": 0.07623502467481376
+    }
+  }
+}

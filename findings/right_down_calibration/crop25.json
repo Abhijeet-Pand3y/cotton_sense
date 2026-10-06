@@ -1,0 +1,12 @@
+{
+ "gamma": 1.5,
+ "C": -1.1074700377615216,
+ "scale": 0.3303937883975716,
+ "n_bolls": 7,
+ "n_instances": 409,
+ "loo_mean_abs_err_pct": 12.28,
+ "note": "size_mm = tb_px * z_raw**(1/gamma) * exp(C); z_raw is raw DA3, no focal",
+ "fitted_on": "inference_results/RightDown_v5/right_down_size_da3.csv",
+ "source": "predicted tip/base (fit_gamma_from_tracks.py)",
+ "depth_variant": "top 1328px + bottom 0px cropped"
+}

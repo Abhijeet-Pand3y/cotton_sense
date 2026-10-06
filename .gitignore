@@ -1,0 +1,72 @@
+# ---- Data, outputs, and local-only folders ----
+/data/
+/datasets/
+/models/
+/inference_results/
+/depth/
+/depth_out/
+/frames/
+/ball_test/
+/context_out/
+/context_out_rel/
+/crop_batch/
+/crop_cmp/
+/debug/
+/experiments/
+/examples/
+/logs/
+/ground_truth/
+/third_party/
+/tools/
+/_archive/
+/drafts/
+/claude reference/
+.claude/
+/annotation_guide/email_for_annotation_guide
+/annotation_guide/images/
+/viewer/tracked/
+
+# ---- Binary / heavy file types ----
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.mp4
+*.MP4
+*.mov
+*.avi
+*.npy
+*.npz
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.db3
+*.zip
+*.tar
+*.gz
+*.xlsx
+*.lock
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+venv/
+
+# ---- Editor / OS / scratch ----
+*.bak
+*.log
+*.swp
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+/viewer/Inference_Viewer (1).html

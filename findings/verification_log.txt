@@ -1,0 +1,107 @@
+independent sampling: 116 ball-frames
+
+=== 1. cross-check vs analyse_ball_sets.py ===
+  matched 116 of 116 rows; max |difference| = 0.00e+00, mean |difference| = 0.00e+00
+  (two different samplers over the same discs; a non-trivial difference here would mean one of them maps image pixels to depth pixels wrongly)
+
+=== 2. gamma per FRAME (first pass fitted one gamma per set) ===
+set                                frames  gamma med      sd     min     max  set-level
+GX010117_ball11in_19in_27in_test        4      0.640   0.020   0.605   0.650      0.655
+GX010117_ball17in_test                  0          -       -       -       -          -   (single distance)
+GX010117_ball19in_27in_test             5      0.699   0.160   0.336   0.705      0.530
+GX010117_ball21in_25in_27in_test        3      0.626   0.134   0.435   0.693      0.639
+GX010117_ball25in_test                  0          -       -       -       -          -   (single distance)
+GX010117_ball9in_21in_test              5      0.685   0.053   0.666   0.797      0.685
+GX010117_ball9in_29in_test              2      0.613   0.088   0.551   0.675      0.703
+GX010117_ball9in_test                   0          -       -       -       -          -   (single distance)
+GX010118_6ball_handheld_test            9      0.708   0.093   0.512   0.808      0.745
+GX010119_ball17in_test                  0          -       -       -       -          -   (single distance)
+
+=== 3. baseline frames vs object frames ===
+set                                 gamma base  gamma obj    shift
+GX010117_ball11in_19in_27in_test         0.645      0.666   +0.021
+GX010117_ball19in_27in_test              0.704      0.694   -0.009
+GX010117_ball21in_25in_27in_test         0.660      0.435   -0.225
+GX010117_ball9in_21in_test               0.688      0.729   +0.041
+GX010117_ball9in_29in_test               0.675      0.639   -0.037
+GX010118_6ball_handheld_test             0.752      0.711   -0.041
+  a large shift would mean the distractor changes the compression itself, not just adds noise
+
+=== 4. ordering, checked in every frame ===
+  GX010117_ball11in_19in_27in_test  0/4 frames with an inversion
+  GX010117_ball19in_27in_test       0/5 frames with an inversion
+  GX010117_ball21in_25in_27in_test  1/3 frames with an inversion   {'25<27': 1}
+  GX010117_ball9in_21in_test        0/5 frames with an inversion
+  GX010117_ball9in_29in_test        0/2 frames with an inversion
+  GX010118_6ball_handheld_test      9/9 frames with an inversion   {'25<27': 9, '15<17': 1}
+  a pair inverted in every frame is a systematic model error; one inverted occasionally is noise
+
+=== 5. sensitivity: does gamma depend on how we sample? ===
+disc    stat        mean gamma      sd  n sets
+0.4     median           0.661   0.075       6
+0.4     trimmed          0.661   0.075       6
+0.5     median           0.660   0.074       6
+0.5     trimmed          0.660   0.074       6
+0.6     median           0.660   0.073       6
+0.6     trimmed          0.659   0.074       6
+0.7     median           0.658   0.073       6
+0.7     trimmed          0.658   0.073       6
+  gamma moving with the disc size would mean it is an artefact of where we sample, not a property of the depth model
+
+=== 6. COMBINED ===
+  gamma from per-set fits : mean 0.660  sd 0.073  n=6 sets
+  gamma from per-frame fits: median 0.678  sd 0.102  n=28 frames
+  bootstrap 95% CI on the set-level mean: [0.602, 0.708]
+  prior study 0.670 is INSIDE that interval
+  gamma = 1 (no compression) is OUTSIDE it -> compression is established
+
+  focal length, solved per set (independent of DA3):
+    GX010117_ball11in_19in_27in_test  f =     2902 px   (offset   +30.4 mm)
+    GX010117_ball19in_27in_test       f =     2929 px   (offset   +34.6 mm)
+    GX010117_ball21in_25in_27in_test  f =     2877 px   (offset   +28.0 mm)
+    GX010117_ball9in_21in_test        f =     2890 px   (offset   +16.0 mm)
+    GX010117_ball9in_29in_test        f =     3023 px   (offset   +34.6 mm)
+    GX010118_6ball_handheld_test      f =     2942 px   (offset   +39.6 mm)
+    combined                          f =     2927 px   sd 53 (1.8%)
+  these are fitted from ball size and tape alone. Consistency across sets means the rig and the tape are trustworthy.
+
+=== GX010120_test (no-tape set, added 2026-08-20) ===
+  scripts/depth/verify_noref_set.py — re-derives every number in
+  findings/per_set/GX010120_test.md and team_share README section 6
+  from the shipped CSVs alone.
+  ok   size mean mm: 44.43 (documented 44.43)
+  ok   size sd mm: 3.131 (documented 3.13)
+  ok   mean abs err %: 11.08 (documented 11.08)
+  ok   mean abs err mm: 4.431 (documented 4.43)
+  ok   signed mean err %: 11.08 (documented 11.08)
+  ok   fraction positive: 1 (documented 1.0)
+  ok   size min mm: 40.08 (documented 40.08)
+  ok   size max mm: 49.13 (documented 49.13)
+  ok   size span, % of true: 22.63 (documented 22.6)
+  ok   r_px spread %: 1.376 (documented 1.38)
+  ok   z spread %: 14.72 (documented 14.7)
+  ok   geometry Z mean mm: 497.8 (documented 497.8)
+  ok   geometry Z sd mm: 2.683 (documented 2.7)
+  ok   geometry Z in: 19.6 (documented 19.6)
+  ok   DA3 Z mean mm: 588.4 (documented 588.4)
+  ok   DA3 vs geometry %: 18.22 (documented 18.22)
+  ok   base mean mm: 42.86 (documented 42.86)
+  ok   bottle mean mm: 44.96 (documented 44.96)
+  ok   bottle sd mm: 3.414 (documented 3.41)
+  ok   bottle - base mm: 2.095 (documented 2.1)
+  ok   base pair spread mm: 2.74 (documented 2.74)
+  ok   r^2, size vs bottle distance: 0.06978 (documented 0.07)
+  ok   baseline mean abs %: 16.99 (documented 16.99)
+  ok   baseline mean abs mm: 6.798 (documented 6.8)
+  ok   baseline signed %: -2.091 (documented -2.09)
+  ok   baseline fraction positive: 0.5431 (documented 0.54)
+  ok   Welch t: -2.031 (documented -2.03)
+  ok   Welch df: 8.595 (documented 8.6)
+  ok   focal px: 2906 (documented 2905.6)
+  ok   tape offset mm: 32.01 (documented 32.01)
+  ok   gamma: 0.7303 (documented 0.7303)
+  ok   scale a: 0.0053 (documented 0.0053)
+  ok   training ball-frames: 116 (documented 116)
+  ok   training recordings: 10 (documented 10)
+  
+  34/34 checks pass

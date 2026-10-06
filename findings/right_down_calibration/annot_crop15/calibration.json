@@ -1,0 +1,9 @@
+{
+ "gamma": 2.55,
+ "C": -1.4245458033377605,
+ "scale": 0.24061772616112762,
+ "n_bolls": 8,
+ "n_instances": 934,
+ "note": "size_mm = tb_px * z_raw**(1/gamma) * exp(C); z_raw is raw DA3, no focal",
+ "fitted_on": "data/annotations/right_down/right_down.xml"
+}

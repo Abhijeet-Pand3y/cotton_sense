@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Ball circle picker</title>
+<style>
+  :root{--bg:#141413;--fg:#e8e6e1;--dim:#8a8781;--line:#2c2c2a;--ok:#5DCAA5;--hot:#ff5c47}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,sans-serif}
+  header{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:12px;
+         align-items:center;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
+  button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:6px;
+         padding:5px 11px;font:inherit;cursor:pointer}
+  button:hover{background:#1e1e1c}
+  button.on{border-color:var(--ok);color:var(--ok)}
+  #stage{position:relative;overflow:hidden;height:calc(100vh - 210px);background:#0d0d0c;cursor:crosshair}
+  canvas{position:absolute;transform-origin:0 0;image-rendering:auto}
+  #side{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:20px;flex-wrap:wrap}
+  table{border-collapse:collapse;font-size:13px;min-width:340px}
+  th,td{text-align:left;padding:3px 9px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500}
+  pre{background:#1a1a19;border:1px solid var(--line);border-radius:6px;padding:10px;
+      margin:0;overflow:auto;font-size:12px;max-height:150px;flex:1;min-width:280px}
+  .hint{color:var(--dim);font-size:12.5px}
+  kbd{background:#232322;border:1px solid var(--line);border-radius:3px;padding:0 5px;font-size:11px}
+  .del{color:var(--hot);cursor:pointer}
+</style></head><body>
+
+<header>
+  <input type="file" id="file" accept="image/*">
+  <button id="mode" class="on">mode: drag radius</button>
+  <button id="undo">undo</button>
+  <button id="clear">clear all</button>
+  <button id="fit">fit view</button>
+  <span class="hint">wheel = zoom · <kbd>space</kbd>/middle-drag = pan · drag a circle to move · drag its edge to resize · <kbd>del</kbd> removes selected</span>
+  <span id="info" class="hint"></span>
+</header>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="side">
+  <div>
+    <table id="tbl"><thead><tr><th>id</th><th>cx</th><th>cy</th><th>r px</th><th></th></tr></thead><tbody></tbody></table>
+    <p class="hint" style="max-width:420px">
+      <b>drag radius</b>: press at the ball's centre, drag to its edge, release.<br>
+      <b>two edges</b>: click one edge, then the opposite edge.<br>
+      Nothing is final: drag inside a circle to move it, drag its edge to resize.
+      Arrow keys nudge by 1px (<kbd>shift</kbd> 5), <kbd>+</kbd>/<kbd>-</kbd> change
+      the radius, <kbd>del</kbd> removes.<br>
+      Zoom in first — at this resolution a few pixels of radius is a few percent of
+      distance. Balls are saved largest-first as ball1, ball2, …
+    </p>
+  </div>
+  <pre id="out">[]</pre>
+  <div>
+    <button id="dl">download balls.json</button>
+    <button id="copy">copy</button>
+    <p class="hint" style="max-width:260px">Save next to the clip's
+    <code>median.jpg</code>, then run <code>measure --balls</code>.</p>
+  </div>
+</div>
+
+<script>
+const stage=document.getElementById('stage'), cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let img=null, circles=[], mode='drag', view={x:0,y:0,s:1};
+let drag=null, pend=null, panning=null, spaceDown=false;
+let sel=-1, hover=null, edit=null;   // edit = {i, kind:'move'|'resize', ox,oy}
+
+document.getElementById('file').onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  img=await createImageBitmap(f);
+  cv.width=img.width; cv.height=img.height;
+  circles=[]; fitView(); render();
+  document.getElementById('info').textContent=`${f.name} — ${img.width}x${img.height}`;
+};
+document.getElementById('mode').onclick=e=>{
+  mode = mode==='drag' ? 'edges' : 'drag';
+  e.target.textContent = 'mode: '+(mode==='drag'?'drag radius':'two edges');
+  pend=null; render();
+};
+document.getElementById('undo').onclick=()=>{circles.pop(); sync();};
+document.getElementById('clear').onclick=()=>{circles=[]; sync();};
+document.getElementById('fit').onclick=()=>{fitView(); render();};
+document.getElementById('copy').onclick=()=>navigator.clipboard.writeText(document.getElementById('out').textContent);
+document.getElementById('dl').onclick=()=>{
+  const b=new Blob([document.getElementById('out').textContent],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='balls.json'; a.click();
+};
+addEventListener('keydown',e=>{if(e.code==='Space'){spaceDown=true;e.preventDefault();}});
+addEventListener('keyup',e=>{if(e.code==='Space')spaceDown=false;});
+addEventListener('keydown',e=>{
+  if(sel<0||!circles[sel]) return;
+  const c=circles[sel];
+  const step = e.shiftKey ? 5 : 1;          // sub-pixel work needs single-px steps
+  let used=true;
+  switch(e.key){
+    case 'ArrowLeft':  c.cx-=step; break;
+    case 'ArrowRight': c.cx+=step; break;
+    case 'ArrowUp':    c.cy-=step; break;
+    case 'ArrowDown':  c.cy+=step; break;
+    case '+': case '=': c.r+=step; break;
+    case '-': case '_': c.r=Math.max(2,c.r-step); break;
+    case 'Delete': case 'Backspace': circles.splice(sel,1); sel=-1; break;
+    default: used=false;
+  }
+  if(used){ e.preventDefault(); sync(); }
+});
+
+function fitView(){
+  if(!img) return;
+  const s=Math.min(stage.clientWidth/img.width, stage.clientHeight/img.height);
+  view={s, x:(stage.clientWidth-img.width*s)/2, y:(stage.clientHeight-img.height*s)/2};
+}
+function toImg(ev){
+  const r=stage.getBoundingClientRect();
+  return {x:(ev.clientX-r.left-view.x)/view.s, y:(ev.clientY-r.top-view.y)/view.s};
+}
+stage.addEventListener('wheel',ev=>{
+  if(!img) return; ev.preventDefault();
+  const p=toImg(ev), k=ev.deltaY<0?1.18:1/1.18;
+  view.s*=k;
+  const r=stage.getBoundingClientRect();
+  view.x=ev.clientX-r.left-p.x*view.s;
+  view.y=ev.clientY-r.top-p.y*view.s;
+  render();
+},{passive:false});
+
+// Which existing circle is under the cursor, and where on it. An edge grab
+// resizes, an interior grab moves. The band scales with zoom so it stays a
+// constant few pixels on screen however far in you are.
+function hitTest(p){
+  const band = 10/view.s;
+  for(let i=circles.length-1;i>=0;i--){
+    const c=circles[i], d=Math.hypot(p.x-c.cx,p.y-c.cy);
+    if(Math.abs(d-c.r)<=band) return {i, kind:'resize'};
+    if(d<c.r) return {i, kind:'move'};
+  }
+  return null;
+}
+
+stage.addEventListener('mousedown',ev=>{
+  if(!img) return;
+  if(ev.button===1||spaceDown){ panning={x:ev.clientX-view.x,y:ev.clientY-view.y}; return; }
+  const p=toImg(ev);
+  const h=hitTest(p);
+  if(h){                                  // edit the existing circle, do not make a new one
+    sel=h.i;
+    const c=circles[h.i];
+    edit={i:h.i, kind:h.kind, ox:p.x-c.cx, oy:p.y-c.cy};
+    render(); table();
+    return;
+  }
+  sel=-1;
+  if(mode==='drag'){ drag={cx:p.x,cy:p.y,r:0}; }
+  else { if(!pend){ pend=p; } else { addFromEdges(pend,p); pend=null; } }
+  render();
+});
+addEventListener('mousemove',ev=>{
+  if(panning){ view.x=ev.clientX-panning.x; view.y=ev.clientY-panning.y; render(); return; }
+  if(edit){
+    const p=toImg(ev), c=circles[edit.i];
+    if(edit.kind==='move'){ c.cx=p.x-edit.ox; c.cy=p.y-edit.oy; }
+    else { c.r=Math.max(2, Math.hypot(p.x-c.cx,p.y-c.cy)); }
+    render(); table(); return;
+  }
+  if(drag){ const p=toImg(ev); drag.r=Math.hypot(p.x-drag.cx,p.y-drag.cy); render(); return; }
+  if(img){                                 // cursor feedback
+    const h=hitTest(toImg(ev));
+    const want = h ? (h.kind==='resize'?'nesw-resize':'move') : 'crosshair';
+    if(stage.style.cursor!==want) stage.style.cursor=want;
+    const hi = h?h.i:null;
+    if(hi!==hover){ hover=hi; render(); }
+  }
+});
+addEventListener('mouseup',ev=>{
+  if(panning){ panning=null; return; }
+  if(edit){ edit=null; sync(); return; }
+  if(drag){ if(drag.r>3){ circles.push({cx:drag.cx,cy:drag.cy,r:drag.r}); sel=circles.length-1; }
+            drag=null; sync(); }
+});
+function addFromEdges(a,b){
+  circles.push({cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, r:Math.hypot(b.x-a.x,b.y-a.y)/2});
+  sync();
+}
+
+function sync(){ render(); table(); }
+function render(){
+  if(!img) return;
+  cv.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.s})`;
+  ctx.drawImage(img,0,0);
+  const lw=Math.max(1.5, 2/view.s);
+  circles.forEach((c,i)=>{
+    const isSel = i===sel, isHov = i===hover;
+    ctx.strokeStyle = isSel ? '#ffcc00' : (isHov ? '#ff8a7a' : '#ff3b30');
+    ctx.lineWidth = isSel ? lw*1.6 : lw;
+    ctx.beginPath(); ctx.arc(c.cx,c.cy,c.r,0,7); ctx.stroke();
+    ctx.strokeStyle='#5DCAA5'; ctx.lineWidth=lw*0.8;
+    ctx.beginPath(); ctx.arc(c.cx,c.cy,c.r*0.6,0,7); ctx.stroke();
+    ctx.fillStyle = isSel ? '#ffcc00' : '#ff3b30';
+    ctx.beginPath(); ctx.arc(c.cx,c.cy,lw*1.6,0,7); ctx.fill();
+    if(isSel){            // handles on the edge, so it is obvious it can be resized
+      ctx.fillStyle='#ffcc00';
+      for(const a of [0,Math.PI/2,Math.PI,3*Math.PI/2]){
+        ctx.beginPath(); ctx.arc(c.cx+c.r*Math.cos(a), c.cy+c.r*Math.sin(a), lw*1.8,0,7); ctx.fill();
+      }
+    }
+    ctx.font=`${Math.max(14,18/view.s)}px system-ui`;
+    ctx.fillText(`${i+1}  r=${c.r.toFixed(1)}`, c.cx+c.r+lw*3, c.cy);
+  });
+  if(drag){ ctx.strokeStyle='#ffcc00'; ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.arc(drag.cx,drag.cy,drag.r,0,7); ctx.stroke(); }
+  if(pend){ ctx.strokeStyle='#ffcc00'; ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.moveTo(pend.x-12/view.s,pend.y); ctx.lineTo(pend.x+12/view.s,pend.y);
+    ctx.moveTo(pend.x,pend.y-12/view.s); ctx.lineTo(pend.x,pend.y+12/view.s); ctx.stroke(); }
+}
+function table(){
+  const sorted=[...circles].sort((a,b)=>b.r-a.r)
+    .map((c,i)=>({id:`ball${i+1}`, cx:+c.cx.toFixed(2), cy:+c.cy.toFixed(2), r:+c.r.toFixed(2)}));
+  const tb=document.querySelector('#tbl tbody'); tb.innerHTML='';
+  sorted.forEach((c,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${c.id}</td><td>${c.cx}</td><td>${c.cy}</td><td><b>${c.r}</b></td>`;
+    const j=circles.findIndex(q=>Math.abs(q.r-c.r)<1e-6);
+    if(j===sel) tr.style.background='#2a2a10';
+    tr.onclick=()=>{ sel=j; sync(); };
+    const td=document.createElement('td'); td.textContent='remove'; td.className='del';
+    td.onclick=()=>{ const j=circles.findIndex(q=>Math.abs(q.r-c.r)<1e-6); if(j>=0)circles.splice(j,1); sync(); };
+    tr.appendChild(td); tb.appendChild(tr);
+  });
+  document.getElementById('out').textContent=JSON.stringify(sorted,null,1);
+}
+table();
+</script></body></html>

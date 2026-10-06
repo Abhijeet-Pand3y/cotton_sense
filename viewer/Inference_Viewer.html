@@ -1,0 +1,2876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cotton-boll inference viewer</title>
+<style>
+:root {
+  --bg-0: #0c0f14;
+  --bg-1: #131822;
+  --bg-2: #1b2230;
+  --bg-3: #232c3d;
+  --border: #2d384e;
+  --text: #e6ecf5;
+  --text-dim: #9aa6bb;
+  --text-faint: #6b7689;
+  --accent: #4ea1ff;
+  --accent-hot: #6cc1ff;
+  --danger: #ff5c6c;
+  --ok: #3ddc97;
+
+  /* Match the cv2 BGR palette but expressed as RGB */
+  --cls-none:  rgb( 60,220, 60);
+  --cls-leaf:  rgb(220,220, 60);
+  --cls-stem:  rgb(255,165, 60);
+  --cls-other-boll: rgb(220, 60, 60);
+  --cls-other: rgb(190, 90,255);
+  --cls-frame-edge: rgb( 60,200,255);
+  --cls-noaux: rgb(200,200,200);
+  --kpt-tip:   rgb( 60,220,255);
+  --kpt-base:  rgb(220, 60,220);
+  --axis:      rgb(255,255,255);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px; -webkit-font-smoothing: antialiased; overflow: hidden; }
+
+button, input, select { font-family: inherit; font-size: inherit; color: var(--text); }
+button {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+button:hover:not(:disabled) { background: var(--bg-3); border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #06121f; border-color: var(--accent); font-weight: 600; }
+button.primary:hover { background: var(--accent-hot); border-color: var(--accent-hot); }
+button.icon { padding: 6px 8px; min-width: 32px; }
+
+input[type=range] { accent-color: var(--accent); }
+input[type=number], select {
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 6px; width: 70px;
+}
+input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+label { cursor: pointer; user-select: none; }
+
+/* ---------------------------------- layout --------------------------------- */
+.app {
+  display: grid;
+  grid-template-rows: 48px 1fr 64px;
+  grid-template-columns: 260px 1fr 280px;
+  grid-template-areas:
+    "header header header"
+    "left   canvas right"
+    "footer footer footer";
+  height: 100vh;
+}
+header.topbar {
+  grid-area: header;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+}
+header .title { font-weight: 600; font-size: 14px; letter-spacing: .3px; }
+header .title .sub { color: var(--text-dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+header .spacer { flex: 1; }
+header .stats { color: var(--text-dim); font-size: 12px; }
+header .stats b { color: var(--text); font-weight: 600; }
+
+aside.left {
+  grid-area: left; overflow-y: auto;
+  background: var(--bg-1); border-right: 1px solid var(--border);
+  padding: 14px 14px 30px;
+}
+aside.right {
+  grid-area: right; overflow-y: auto;
+  background: var(--bg-1); border-left: 1px solid var(--border);
+  padding: 14px 14px 30px;
+}
+main.center {
+  grid-area: canvas;
+  position: relative;
+  display: flex; flex-direction: column;
+  background:
+    linear-gradient(45deg, #0a0d12 25%, transparent 25%, transparent 75%, #0a0d12 75%),
+    linear-gradient(45deg, #0a0d12 25%, transparent 25%, transparent 75%, #0a0d12 75%);
+  background-color: #11151c;
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+  overflow: hidden;
+}
+footer.footer {
+  grid-area: footer;
+  background: var(--bg-1); border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px; padding: 0 16px;
+}
+
+/* ----------------------------------- canvas -------------------------------- */
+.canvas-wrap {
+  position: relative; flex: 1; min-height: 0;
+  overflow: hidden;
+}
+.canvas-wrap canvas { position: absolute; left: 0; top: 0; }
+canvas { box-shadow: 0 0 60px rgba(0,0,0,.6); cursor: crosshair; transform-origin: 0 0; }
+canvas.panning { cursor: grabbing; }
+canvas.zoomed   { cursor: grab; }
+canvas.zoomed:active { cursor: grabbing; }
+.empty-state {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--text-dim); text-align: center; padding: 40px;
+}
+.empty-state h2 { color: var(--text); margin: 0 0 8px; font-size: 20px; font-weight: 500; }
+.empty-state p { margin: 4px 0; max-width: 460px; line-height: 1.5; }
+.empty-state .load-btns { margin-top: 22px; display: flex; gap: 10px; }
+.empty-state .hint { font-size: 11px; color: var(--text-faint); margin-top: 18px; }
+.toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 16px; max-width: 80%; z-index: 10;
+  box-shadow: 0 6px 28px rgba(0,0,0,.5);
+}
+.toast.err { border-color: var(--danger); color: var(--danger); }
+.toast.ok  { border-color: var(--ok); color: var(--ok); }
+.loading-bar {
+  position: absolute; top: 0; left: 0; height: 3px;
+  background: var(--accent); transition: width .15s;
+  z-index: 20;
+}
+
+/* ---------------------------------- sidebars ------------------------------- */
+.section { margin-bottom: 18px; }
+.section h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-faint); margin: 0 0 8px; font-weight: 600;
+}
+.toggle-row, .filter-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0;
+}
+.toggle-row label { flex: 1; }
+.toggle-row .swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  vertical-align: middle; margin-right: 6px;
+}
+.indent { padding-left: 18px; }
+.filter-row { flex-wrap: wrap; }
+.filter-row .val { color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+.divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+.class-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  font-size: 11px; cursor: pointer; user-select: none;
+}
+.class-chip.off { opacity: .35; }
+.class-chip .dot { width: 8px; height: 8px; border-radius: 999px; }
+.class-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* ---------------------------------- footer --------------------------------- */
+.footer .play-btn { width: 42px; height: 42px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #06121f; border: none; font-size: 18px; }
+.footer .play-btn:hover { background: var(--accent-hot); }
+.footer .scrub-wrap { flex: 1; display: flex; align-items: center; gap: 10px; }
+.footer .scrub { flex: 1; }
+.footer .frame-counter {
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-dim);
+  min-width: 110px; text-align: right;
+}
+.footer .frame-counter b { color: var(--text); }
+.footer .speed { min-width: 64px; }
+.footer .stepper-btn { width: 32px; height: 32px; padding: 0; }
+
+/* ----------------------------------- details ------------------------------- */
+.details-empty { color: var(--text-faint); font-size: 12px; padding: 16px 4px; line-height: 1.5; }
+.detail-row {
+  display: flex; justify-content: space-between;
+  padding: 4px 0; border-bottom: 1px solid var(--bg-3);
+  font-size: 12px;
+}
+.detail-row .k { color: var(--text-dim); }
+.detail-row .v { font-variant-numeric: tabular-nums; color: var(--text); }
+.detail-class { font-weight: 600; padding: 6px 0; }
+.bar {
+  height: 6px; background: var(--bg-2); border-radius: 99px; overflow: hidden; margin: 3px 0 8px;
+}
+.bar .fill { height: 100%; background: var(--accent); }
+.legend {
+  margin-top: 14px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: var(--text-dim);
+}
+.legend .item { display: flex; align-items: center; gap: 6px; }
+.legend .item .swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+/* ----------------------------------- depth ---------------------------------- */
+.depth-legend { margin-top: 8px; }
+.depth-legend .grad { height: 10px; border-radius: 3px; border: 1px solid var(--border); }
+.depth-legend .ticks {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-dim); margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.mode-seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.mode-seg button { flex: 1; border: none; border-radius: 0; background: var(--bg-1); font-size: 11px; padding: 5px 4px; }
+.mode-seg button.on { background: var(--accent); color: #06121f; font-weight: 600; }
+#depth-readout {
+  position: absolute; right: 10px; bottom: 10px; z-index: 5;
+  background: rgba(0,0,0,.7); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 10px; font-family: ui-monospace, "SF Mono", monospace; font-size: 11px;
+  color: var(--text); pointer-events: none; display: none;
+}
+
+/* ------------------------------ boll size report ---------------------------- */
+#report-modal {
+  display: none; position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,.55); align-items: center; justify-content: center;
+}
+#report-modal.open { display: flex; }
+.report-box {
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
+  width: min(880px, 92vw); max-height: 82vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 60px rgba(0,0,0,.6);
+}
+.report-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.report-sub { color: var(--text-dim); font-size: 11px; }
+.report-body { overflow: auto; padding: 12px 16px 16px; }
+.report-body table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.report-body th, .report-body td {
+  padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--bg-3);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.report-body th { color: var(--text-faint); text-transform: uppercase; font-size: 10px; letter-spacing: .5px; }
+.report-body td:first-child, .report-body th:first-child { text-align: left; }
+.report-note { font-size: 11px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.5; }
+
+/* ------------------------------ live plot panel ----------------------------- */
+#plot-panel {
+  display: none; flex-direction: column; flex: 0 0 auto;
+  height: 235px; min-height: 140px; max-height: 70vh;
+  background: var(--bg-1); border-bottom: 1px solid var(--border);
+  overflow: hidden; position: relative; z-index: 5;
+}
+#plot-panel.open { display: flex; resize: vertical; }
+.plot-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto;
+}
+.plot-head .ttl { font-weight: 600; font-size: 12px; white-space: nowrap; }
+.plot-stats { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.plot-stats .chip {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px;
+  padding: 2px 8px; font-size: 11px; color: var(--text-dim);
+}
+.plot-stats .chip b {
+  color: var(--text); margin-left: 5px;
+  font-family: ui-monospace, "SF Mono", monospace; font-variant-numeric: tabular-nums;
+}
+.plot-gt { display: flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 12px; }
+.plot-gt input { width: 70px; }
+.plot-body { flex: 1; position: relative; min-height: 0; }
+#plot-cv { position: absolute; left: 0; top: 0; box-shadow: none; cursor: default; }
+
+/* ----------------------------------- misc ---------------------------------- */
+.kbd {
+  display: inline-block; padding: 1px 5px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 3px;
+  font-family: ui-monospace, "SF Mono", monospace; font-size: 11px;
+  color: var(--text-dim);
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================== TOP BAR =============================== -->
+  <header class="topbar">
+    <div class="title">Cotton-boll inference viewer<span class="sub">v1.5 · RGB-D · robust sizing</span></div>
+    <div class="spacer"></div>
+    <div class="stats" id="stats"></div>
+    <button id="load-frames-btn">Load frames</button>
+    <button id="load-dets-btn">Load detections</button>
+    <button id="load-depth-btn">Load depth</button>
+    <button id="report-btn" title="Scan all frames and compute an outlier-rejected tip–base size per tracked boll">Boll report</button>
+    <button class="icon" id="help-btn" title="Keyboard shortcuts">?</button>
+  </header>
+
+  <!-- ============================== LEFT PANEL ============================ -->
+  <aside class="left">
+
+    <div class="section">
+      <h3>Layers</h3>
+      <div class="toggle-row"><input type="checkbox" id="t-bbox" checked><label for="t-bbox">Bounding box</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-mask-fill" checked><label for="t-mask-fill">Mask fill</label></div>
+      <div class="filter-row indent">
+        <label for="mask-alpha">Alpha</label>
+        <input type="range" id="mask-alpha" min="0" max="1" step="0.05" value="0.35" style="flex:1">
+        <span class="val" id="mask-alpha-v">0.35</span>
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="t-mask-outline" checked><label for="t-mask-outline">Mask outline</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-kpt-tip" checked><label for="t-kpt-tip"><span class="swatch" style="background:var(--kpt-tip)"></span>Tip keypoint</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-kpt-base" checked><label for="t-kpt-base"><span class="swatch" style="background:var(--kpt-base)"></span>Base keypoint</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-axis" checked><label for="t-axis"><span class="swatch" style="background:var(--axis); border:1px solid var(--border)"></span>Axis line</label></div>
+      <div class="filter-row indent">
+        <label for="kpt-conf-min" style="flex:1">Kpt conf threshold</label>
+        <span class="val" id="kpt-conf-min-v">0.30</span>
+      </div>
+      <input type="range" id="kpt-conf-min" min="0" max="1" step="0.01" value="0.30" style="width:100%">
+      <div style="font-size:10px; color:var(--text-faint); margin-top:2px; line-height:1.4">
+        Above threshold = filled (model committed). Below = hollow (low conf / guessed).
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="t-track-id" checked><label for="t-track-id">Track-ID badge</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-trails"><label for="t-trails">Centroid trails (tracked)</label></div>
+      <div class="filter-row indent">
+        <label for="trail-len" style="flex:1">Trail length (frames)</label>
+        <span class="val" id="trail-len-v">20</span>
+      </div>
+      <input type="range" id="trail-len" min="3" max="80" step="1" value="20" style="width:100%">
+      <div class="toggle-row"><input type="checkbox" id="t-label" checked><label for="t-label">Label text</label></div>
+      <div class="indent">
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-cls" checked><label for="t-lbl-cls">occ class + conf</label></div>
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-v" checked><label for="t-lbl-v">visfrac (v=...)</label></div>
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-d" checked><label for="t-lbl-d">det conf (d=...)</label></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>Depth (RGB-D)</h3>
+      <div class="toggle-row"><input type="checkbox" id="t-depth"><label for="t-depth">Depth overlay <span class="kbd">D</span></label></div>
+      <div class="indent">
+        <div class="mode-seg" style="margin:4px 0 8px">
+          <button id="depth-mode-full" class="on" title="Colorize the whole frame (M to toggle)">Full frame</button>
+          <button id="depth-mode-bolls" title="Colorize only inside segmented boll masks (M to toggle)">Bolls only</button>
+        </div>
+        <div class="filter-row">
+          <label for="depth-alpha">Opacity</label>
+          <input type="range" id="depth-alpha" min="0" max="1" step="0.05" value="0.65" style="flex:1">
+          <span class="val" id="depth-alpha-v">0.65</span>
+        </div>
+        <div class="filter-row">
+          <label for="depth-range-sel">Range</label>
+          <select id="depth-range-sel" style="flex:1; width:auto">
+            <option value="auto" selected>Auto (2–98%)</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </div>
+        <div class="filter-row" id="depth-fixed-row" style="display:none">
+          <input type="number" id="depth-min-cm" value="200" step="50" title="min, arbitrary units"> –
+          <input type="number" id="depth-max-cm" value="1500" step="50" title="max (mm when calibrated)"> <span id="depth-range-unit">u</span>
+        </div>
+        <div class="filter-row">
+          <label for="depth-tol-pct" title="Tip/base depth is the median of window pixels within this % of the boll's own depth. Larger = accepts more, risks background bleed; smaller = stricter, may fall back to the boll depth.">Kpt depth tol</label>
+          <input type="number" id="depth-tol-pct" value="5" min="0.1" max="100" step="0.5" style="width:70px"> %
+        </div>
+        <div class="depth-legend" id="depth-legend" style="display:none">
+          <div class="grad" id="depth-grad"></div>
+          <div class="ticks"><span id="depth-tick-min">–</span><span id="depth-tick-mid">–</span><span id="depth-tick-max">–</span></div>
+        </div>
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="t-depth-heights" checked><label for="t-depth-heights">Boll height labels (3-D, tip↔base)</label></div>
+      <div style="font-size:10px; color:var(--text-faint); margin-top:4px; line-height:1.4" id="depth-status">
+        No depth loaded. Click "Load depth" and pick the <b>depth/</b> folder of .npy maps
+        (or drop the whole run folder — <code>metadata.json</code> is auto-detected for intrinsics).
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>Filters</h3>
+      <div class="filter-row">
+        <label for="conf-min" style="flex:1">Min det conf</label>
+        <span class="val" id="conf-min-v">0.25</span>
+      </div>
+      <input type="range" id="conf-min" min="0" max="1" step="0.01" value="0.25" style="width:100%">
+
+      <div class="filter-row" style="margin-top:8px">
+        <label for="vis-min" style="flex:1">Min visfrac</label>
+        <span class="val" id="vis-min-v">0.00</span>
+      </div>
+      <input type="range" id="vis-min" min="0" max="1" step="0.01" value="0.00" style="width:100%">
+
+      <div class="filter-row" style="margin-top:10px"><label>Occlusion class</label></div>
+      <div class="class-chips" id="class-chips">
+        <span class="class-chip" data-cls="none"><span class="dot" style="background:var(--cls-none)"></span>none</span>
+        <span class="class-chip" data-cls="leaf"><span class="dot" style="background:var(--cls-leaf)"></span>leaf</span>
+        <span class="class-chip" data-cls="stem"><span class="dot" style="background:var(--cls-stem)"></span>stem</span>
+        <span class="class-chip" data-cls="other_boll"><span class="dot" style="background:var(--cls-other-boll)"></span>other boll</span>
+        <span class="class-chip" data-cls="other"><span class="dot" style="background:var(--cls-other)"></span>other</span>
+        <span class="class-chip" data-cls="frame_edge"><span class="dot" style="background:var(--cls-frame-edge)"></span>frame edge</span>
+        <span class="class-chip" data-cls="_noaux"><span class="dot" style="background:var(--cls-noaux)"></span>no aux</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>View</h3>
+      <div class="toggle-row"><input type="checkbox" id="t-dim-unsel"><label for="t-dim-unsel">Dim non-selected</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-fit" checked><label for="t-fit">Fit to window</label></div>
+      <div class="filter-row" style="margin-top:6px">
+        <button id="snap-btn" style="flex:1">Save current frame as PNG</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>Zoom</h3>
+      <div class="filter-row">
+        <button id="zoom-out-btn" class="icon" title="Zoom out">−</button>
+        <span class="val" id="zoom-display" style="flex:1; text-align:center; font-variant-numeric:tabular-nums">100%</span>
+        <button id="zoom-in-btn" class="icon" title="Zoom in">+</button>
+      </div>
+      <div class="filter-row" style="margin-top:6px">
+        <button id="zoom-fit-btn" style="flex:1">Fit window</button>
+        <button id="zoom-100-btn" style="flex:1">100%</button>
+      </div>
+      <div style="font-size:10px; color:var(--text-faint); margin-top:6px; line-height:1.5">
+        Scroll wheel = zoom at cursor. Click + drag = pan. <span class="kbd">0</span> = reset to fit.
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============================== CANVAS ================================ -->
+  <main class="center">
+    <div id="plot-panel">
+      <div class="plot-head">
+        <span class="ttl" id="plot-title">Boll measurement (u)</span>
+        <div class="plot-stats" id="plot-stats"></div>
+        <label class="plot-gt">GT <input type="number" id="gt-input" step="0.5" placeholder="none"> mm</label>
+        <button id="plot-clear-btn">Clear</button>
+        <button class="icon" id="plot-close-btn" title="Close plot panel">✕</button>
+      </div>
+      <div class="plot-body"><canvas id="plot-cv" width="400" height="150"></canvas></div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv" width="800" height="600"></canvas>
+    </div>
+    <div class="loading-bar" id="loading-bar" style="display:none"></div>
+    <div class="empty-state" id="empty-state">
+      <h2>Load an inference run</h2>
+      <p>Pick a folder of <b>original (un-annotated) frames</b>, then a folder of
+        <b>per-frame JSON detections</b> (the output of <code>infer_v3.py --save-json</code>).</p>
+      <p>If both are in the <i>same</i> folder, just pick it once with "Load frames".</p>
+      <p>Optionally add RealSense depth: pick the <b>depth/</b> folder of .npy maps with "Load depth" —
+        or simply pick the whole run folder once (frames + detections + depth + metadata.json all load together).</p>
+      <div class="load-btns">
+        <button class="primary" id="load-frames-btn-2">Load frames folder</button>
+        <button id="load-dets-btn-2">Load detections folder</button>
+      </div>
+      <div class="hint">
+        Tested on Chrome / Edge. Supports drag-and-drop too — drop a folder anywhere on this window.
+      </div>
+    </div>
+    <div id="depth-readout"></div>
+    <div class="toast" id="toast" style="display:none"></div>
+    <div id="report-modal">
+      <div class="report-box">
+        <div class="report-head">
+          <b>Boll size report</b>
+          <span class="report-sub" id="report-sub"></span>
+          <span style="flex:1"></span>
+          <button id="report-rescan-btn" title="Recompute from scratch (use after changing thresholds or data)">Rescan</button>
+          <button id="report-csv-btn">Export CSV</button>
+          <button class="icon" id="report-close-btn" title="Close">✕</button>
+        </div>
+        <div class="report-body" id="report-body"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============================== RIGHT PANEL =========================== -->
+  <aside class="right">
+    <div class="section">
+      <h3>Selection</h3>
+      <div id="details">
+        <div class="details-empty">
+          Click any boll on the canvas to see its full per-detection record here
+          — and to open the live measurement plot above the frame (tip–base mm vs frame).
+        </div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section">
+      <h3>Class legend</h3>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:var(--cls-none)"></span>none — unobstructed</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-leaf)"></span>leaf — leaf occlusion</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-stem)"></span>stem — stem / branch occlusion</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-other-boll)"></span>other boll — occluded by another boll</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-other)"></span>other — other occluder</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-frame-edge)"></span>frame edge — cut off by image border</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-noaux)"></span>no aux — aux head not run</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section">
+      <h3>Frame stats</h3>
+      <div id="frame-stats" class="details-empty">No frame loaded.</div>
+    </div>
+  </aside>
+
+  <!-- ============================== FOOTER ================================ -->
+  <footer class="footer">
+    <button class="stepper-btn" id="first-btn" title="First frame (Home)">⏮</button>
+    <button class="stepper-btn" id="prev-btn" title="Prev frame (Left)">◀</button>
+    <button class="play-btn" id="play-btn" title="Play / Pause (Space)">▶</button>
+    <button class="stepper-btn" id="next-btn" title="Next frame (Right)">▶</button>
+    <button class="stepper-btn" id="last-btn" title="Last frame (End)">⏭</button>
+
+    <div class="scrub-wrap">
+      <input type="range" id="scrub" class="scrub" min="0" max="0" value="0">
+      <span class="frame-counter" id="counter"><b>0</b> / 0</span>
+    </div>
+
+    <label for="speed-sel" style="color:var(--text-dim)">Speed</label>
+    <select id="speed-sel" class="speed">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+      <option value="8">8x</option>
+    </select>
+    <label for="fps-input" style="color:var(--text-dim)">FPS</label>
+    <input type="number" id="fps-input" value="15" min="1" max="120" step="1" style="width:54px">
+  </footer>
+</div>
+
+<script>
+// =============================================================================
+//   STATE
+// =============================================================================
+const state = {
+  frames: [],          // [{ name, stem, imageBitmap, image (HTMLImageElement), width, height, detections }]
+  framesIndexByStem: new Map(),
+  current: 0,
+  playing: false,
+  baseFps: 15,
+  speed: 1,
+  lastFrameTime: 0,
+  // toggles
+  layers: {
+    bbox: true, maskFill: true, maskOutline: true,
+    tip: true, base: true, axis: true,
+    label: true, lblCls: true, lblV: true, lblD: true,
+    trackId: true, trails: false,
+  },
+  // filters
+  filters: {
+    confMin: 0.25,
+    visMin: 0.0,
+    kptConfMin: 0.30,
+    classes: new Set(["none","leaf","stem","other_boll","other","frame_edge","_noaux"]),
+  },
+  // view
+  view: {
+    dimUnselected: false,
+    fitToWindow: true,
+    maskAlpha: 0.35,
+    trailLen: 20,
+    zoom: 1.0,        // CSS scale factor applied to canvas
+    panX: 0,          // CSS translateX in CSS pixels
+    panY: 0,          // CSS translateY in CSS pixels
+  },
+  // selection
+  selectedBollIdx: null,
+  // live measurement plot panel (docked above the frame canvas)
+  plot: {
+    visible: false,        // panel shown?
+    target: null,          // { type:"track", id } | { type:"index", idx }
+    label: "",
+    points: new Map(),     // frame idx -> tip–base distance (mm)
+    gt: null,              // constant ground-truth value (mm)
+  },
+  // depth (RGB-D)
+  depth: {
+    enabled: false,
+    mode: "full",            // "full" | "bolls"
+    alpha: 0.65,
+    showHeights: true,
+    rangeMode: "auto",       // "auto" | "fixed"
+    fixedMinM: 0.20,
+    fixedMaxM: 1.50,
+    filesByStem: new Map(),  // stem -> File (.npy, lazy-parsed)
+    meta: null,              // parsed metadata.json (intrinsics, depth_scale, ...)
+    depthScale: 0.001,       // m per raw unit (overridden by metadata.json)
+    calibrated: false,       // true when metadata.json declares metric units
+    // Tip/base depth gate, as a PERCENT of the boll's own depth. A keypoint
+    // sample is kept only if |z - zBoll| <= tolPct% * zBoll. Relative (not a
+    // fixed cm) so it stays sensible whether the boll is near or far, and so it
+    // works on depth whose absolute scale is arbitrary (monocular nets).
+    tolPct: 5,
+    cropTopPx: 0,            // from crop_info.json; depth covers frame BELOW this
+    cache: new Map(),        // stem -> parsed { data, width, height, dtype, autoMinRaw, autoMaxRaw, validFrac }
+    colorCache: new Map(),   // stem -> { key, canvas, minM, maxM }
+    cacheOrder: [],          // LRU order for cache eviction
+  },
+};
+
+// Color palette (RGB; matches CV2 BGR palette flipped).
+const COLOR_BY_CLASS = {
+  "none":       "rgb(60,220,60)",
+  "leaf":       "rgb(220,220,60)",
+  "stem":       "rgb(255,165,60)",
+  "other_boll": "rgb(220,60,60)",
+  "other":      "rgb(190,90,255)",
+  "frame_edge": "rgb(60,200,255)",
+  "_noaux":     "rgb(200,200,200)",
+};
+const COLOR_TIP  = "rgb(60,220,255)";
+const COLOR_BASE = "rgb(220,60,220)";
+const COLOR_AXIS = "rgb(255,255,255)";
+
+const IMG_EXTS = new Set(["jpg","jpeg","png","bmp","tif","tiff","webp"]);
+
+// =============================================================================
+//   DEPTH (RGB-D) SUPPORT
+// =============================================================================
+// Turbo colormap (Google), 256-entry LUT via polynomial approximation.
+const TURBO_LUT = (() => {
+  const lut = [];
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    const r = 34.61 + t * (1172.33 - t * (10793.56 - t * (33300.12 - t * (38394.49 - t * 14825.05))));
+    const g = 23.31 + t * (557.33 + t * (1225.33 - t * (3574.96 - t * (1073.77 + t * 707.56))));
+    const b = 27.2  + t * (3211.1 - t * (15327.97 - t * (27814.0 - t * (22569.18 - t * 6838.66))));
+    lut.push([r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v)))));
+  }
+  return lut;
+})();
+
+// Minimal .npy parser (v1/v2 headers, C-order, uint16 / float32 / uint8).
+async function parseNpy(file) {
+  const buf = await file.arrayBuffer();
+  const dv = new DataView(buf);
+  if (dv.getUint8(0) !== 0x93) throw new Error("not a .npy file");
+  const major = dv.getUint8(6);
+  let headerLen, offset;
+  if (major >= 2) { headerLen = dv.getUint32(8, true); offset = 12; }
+  else            { headerLen = dv.getUint16(8, true); offset = 10; }
+  const header = new TextDecoder().decode(new Uint8Array(buf, offset, headerLen));
+  const descr = /'descr':\s*'([^']+)'/.exec(header)?.[1];
+  const fortran = /'fortran_order':\s*(True|False)/.exec(header)?.[1] === "True";
+  const shape = (/'shape':\s*\(([^)]*)\)/.exec(header)?.[1] || "")
+    .split(",").map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+  if (fortran) throw new Error("fortran-order .npy not supported");
+  if (shape.length !== 2) throw new Error("expected 2-D depth array, got shape (" + shape + ")");
+  const dataOff = offset + headerLen;
+  let data;
+  if (descr === "<u2" || descr === "|u2")       data = new Uint16Array(buf, dataOff, shape[0] * shape[1]);
+  else if (descr === "<f4")                     data = new Float32Array(buf, dataOff, shape[0] * shape[1]);
+  else if (descr === "|u1" || descr === "<u1")  data = new Uint8Array(buf, dataOff, shape[0] * shape[1]);
+  else throw new Error("unsupported dtype " + descr);
+  return { data, width: shape[1], height: shape[0], dtype: descr };
+}
+
+// Raw depth value -> meters. float32 maps are assumed to already be meters.
+function depthValToM(depth, v) {
+  return depth.dtype === "<f4" ? v : v * state.depth.depthScale;
+}
+
+// ---- depth <-> image coordinate mapping -------------------------------------
+// A depth map need match neither the RESOLUTION nor the EXTENT of the frame.
+//   Resolution: RealSense maps are registered 1:1, but monocular networks (Depth
+//     Anything, Depth Pro, ...) emit a downscaled map — e.g. 280x504 for a
+//     2988x5312 frame.
+//   Extent: the depth may have been computed on a frame whose top band was cut
+//     off (run_da3_depth.py --crop_top_frac, used to remove a greenhouse roof
+//     that field data will not contain). crop_info.json records that offset.
+// Detection coordinates (mask_poly, kpts, bbox) are always in ORIGINAL image
+// pixels, so a lookup must subtract the crop offset and then scale to depth
+// indices. Getting either wrong reads a completely different part of the scene.
+function depthCropTop() {
+  return state.depth.cropTopPx || 0;
+}
+
+function depthScaleOf(depth) {
+  const yOff = depthCropTop();
+  // Effective frame the depth map covers: full width, height minus the cut band.
+  const iw = depth.imgW || cv.width || depth.width;
+  const ihFull = depth.imgH || cv.height || depth.height;
+  const ih = Math.max(1, ihFull - yOff);
+  return { sx: depth.width / iw, sy: depth.height / ih };
+}
+
+// original-image px -> depth index space (unrounded, unclamped)
+function imgToDepthXY(depth, x, y) {
+  const { sx, sy } = depthScaleOf(depth);
+  return [x * sx, (y - depthCropTop()) * sy];
+}
+
+const DEPTH_CACHE_MAX = 12;
+const depthPending = new Set();    // stems with a render-triggered redraw subscription
+const depthPromises = new Map();   // stem -> in-flight parse promise (dedup)
+
+function depthWanted(stem) {
+  const plotActive = state.plot && state.plot.target && state.plot.visible;
+  return (state.depth.enabled || state.depth.showHeights || plotActive)
+      && state.depth.filesByStem.has(stem);
+}
+
+function getDepth(frame) {
+  const stem = frame.stem;
+  if (state.depth.cache.has(stem)) return Promise.resolve(state.depth.cache.get(stem));
+  if (depthPromises.has(stem)) return depthPromises.get(stem);
+  const file = state.depth.filesByStem.get(stem);
+  if (!file) return Promise.resolve(null);
+  const p = (async () => {
+    let parsed;
+    try { parsed = await parseNpy(file); }
+    catch (e) { console.warn("depth parse failed:", stem, e); return null; }
+    // Auto display range: 2nd/98th percentile of valid (>0) pixels, subsampled.
+    const { data } = parsed;
+    const step = Math.max(1, Math.floor(data.length / 200000));
+    const vals = [];
+    for (let i = 0; i < data.length; i += step) { const v = data[i]; if (v > 0) vals.push(v); }
+    vals.sort((a, b) => a - b);
+    const q = (pp) => vals.length ? vals[Math.min(vals.length - 1, Math.floor(pp * vals.length))] : 0;
+    parsed.autoMinRaw = q(0.02);
+    parsed.autoMaxRaw = q(0.98);
+    parsed.validFrac = data.length ? (vals.length * step) / data.length : 0;
+    // Native frame size, so depth lookups can map image px -> depth indices.
+    // May be 0 if the image hasn't decoded yet; depthScaleOf falls back to the
+    // canvas size, which fitCanvas always sets to the native image size.
+    parsed.imgW = frame.width || 0;
+    parsed.imgH = frame.height || 0;
+    state.depth.cache.set(stem, parsed);
+    state.depth.cacheOrder.push(stem);
+    while (state.depth.cacheOrder.length > DEPTH_CACHE_MAX) {
+      const old = state.depth.cacheOrder.shift();
+      if (old !== stem) { state.depth.cache.delete(old); state.depth.colorCache.delete(old); }
+    }
+    return parsed;
+  })();
+  depthPromises.set(stem, p);
+  p.finally(() => depthPromises.delete(stem));
+  return p;
+}
+
+function currentDepthRange(depth) {
+  if (state.depth.rangeMode === "fixed") {
+    const minM = state.depth.fixedMinM;
+    return { minM, maxM: Math.max(minM + 0.01, state.depth.fixedMaxM) };
+  }
+  const minM = depthValToM(depth, depth.autoMinRaw);
+  return { minM, maxM: Math.max(minM + 0.01, depthValToM(depth, depth.autoMaxRaw)) };
+}
+
+// Colorized offscreen canvas for a frame's depth map (cached per range).
+function colorizeDepth(frame, depth) {
+  const { minM, maxM } = currentDepthRange(depth);
+  const key = minM.toFixed(4) + "_" + maxM.toFixed(4);
+  let cc = state.depth.colorCache.get(frame.stem);
+  if (cc && cc.key === key) return cc;
+  const { data, width, height } = depth;
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const c2 = canvas.getContext("2d");
+  const img = c2.createImageData(width, height);
+  const px = img.data;
+  const factor = depth.dtype === "<f4" ? 1 : state.depth.depthScale;
+  const span = maxM - minM;
+  for (let i = 0; i < data.length; i++) {
+    const v = data[i];
+    const o = i * 4;
+    if (v === 0) { px[o + 3] = 0; continue; }           // invalid depth = transparent
+    let t = (v * factor - minM) / span;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const c = TURBO_LUT[(t * 255) | 0];
+    px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255;
+  }
+  c2.putImageData(img, 0, 0);
+  cc = { key, canvas, minM, maxM };
+  state.depth.colorCache.set(frame.stem, cc);
+  return cc;
+}
+
+// Robust depth at a pixel: median of valid values in a growing window.
+// Returns { m, est } (est = true when the window had to grow past 7x7,
+// i.e. the value is a nearby estimate, not the exact keypoint pixel).
+function sampleDepthM(depth, x, y) {
+  if (x == null || y == null) return null;
+  const { data, width, height } = depth;
+  const [dx, dy] = imgToDepthXY(depth, x, y);   // image px -> depth indices
+  const cx = Math.round(dx), cy = Math.round(dy);
+  if (cx < 0 || cy < 0 || cx >= width || cy >= height) return null;
+  for (const r of [3, 7, 12]) {
+    const vals = [];
+    for (let yy = Math.max(0, cy - r); yy <= Math.min(height - 1, cy + r); yy++) {
+      const row = yy * width;
+      for (let xx = Math.max(0, cx - r); xx <= Math.min(width - 1, cx + r); xx++) {
+        const v = data[row + xx];
+        if (v > 0) vals.push(v);
+      }
+    }
+    if (vals.length >= 5) {
+      vals.sort((a, b) => a - b);
+      return { m: depthValToM(depth, vals[vals.length >> 1]), est: r > 3 };
+    }
+  }
+  return null;
+}
+
+// ---- boll-level depth statistics (mask ROI) ---------------------------------
+// Robust depth of the whole boll: median over pixels inside the mask polygon.
+// Median (not mean) so invalid pixels and background bleed-through at the
+// silhouette can't skew it. This is also the camera->boll distance.
+// Cached on the detection record (computed once per boll).
+function bollDepthStats(d, depth) {
+  if (d._ds !== undefined) return d._ds;
+  const vals = [];
+  const { data, width, height } = depth;
+  // Iterate in DEPTH index space (so every sample is a real depth pixel), but
+  // test polygon membership in IMAGE space, where mask_poly lives.
+  const { sx, sy } = depthScaleOf(depth);
+  const poly = d.mask_poly;
+  if (poly && poly.length >= 3) {
+    let px0 = Infinity, py0 = Infinity, px1 = -Infinity, py1 = -Infinity;
+    for (const [x, y] of poly) {
+      if (x < px0) px0 = x; if (x > px1) px1 = x;
+      if (y < py0) py0 = y; if (y > py1) py1 = y;
+    }
+    const yOff = depthCropTop();
+    const x0 = Math.max(0, Math.floor(px0 * sx)), x1 = Math.min(width - 1, Math.ceil(px1 * sx));
+    const y0 = Math.max(0, Math.floor((py0 - yOff) * sy)), y1 = Math.min(height - 1, Math.ceil((py1 - yOff) * sy));
+    const area = Math.max(1, (x1 - x0 + 1) * (y1 - y0 + 1));
+    const stride = Math.max(1, Math.round(Math.sqrt(area / 1500)));   // ~1500 samples
+    for (let y = y0; y <= y1; y += stride) {
+      const row = y * width;
+      for (let x = x0; x <= x1; x += stride) {
+        if (!pointInPoly(x / sx, y / sy + yOff, poly)) continue;  // back to image space
+        const v = data[row + x];
+        if (v > 0) vals.push(depthValToM(depth, v));
+      }
+    }
+  } else if (d.bbox) {
+    // No mask: sample the central 50% of the bbox instead.
+    const [bx, by, bw, bh] = d.bbox;
+    const yOff2 = depthCropTop();
+    const x0 = Math.max(0, Math.round((bx + bw * 0.25) * sx)), x1 = Math.min(width - 1, Math.round((bx + bw * 0.75) * sx));
+    const y0 = Math.max(0, Math.round((by + bh * 0.25 - yOff2) * sy)), y1 = Math.min(height - 1, Math.round((by + bh * 0.75 - yOff2) * sy));
+    const stride = Math.max(1, Math.round(Math.sqrt(Math.max(1, (x1 - x0 + 1) * (y1 - y0 + 1)) / 1500)));
+    for (let y = y0; y <= y1; y += stride) {
+      const row = y * width;
+      for (let x = x0; x <= x1; x += stride) {
+        const v = data[row + x];
+        if (v > 0) vals.push(depthValToM(depth, v));
+      }
+    }
+  }
+  if (vals.length < 20) { d._ds = null; return null; }
+  vals.sort((a, b) => a - b);
+  const q = (p) => vals[Math.min(vals.length - 1, Math.floor(p * vals.length))];
+  d._ds = { zMedM: q(0.5), q25: q(0.25), q75: q(0.75), n: vals.length };
+  return d._ds;
+}
+
+// Depth at a keypoint, constrained to the boll's own depth. Median of valid
+// window pixels within tolPct% of zRefM — rejects background foliage that bleeds
+// through at the boll silhouette (the cause of large outliers). A RELATIVE gate
+// keeps the same physical meaning near and far, and stays valid when the depth
+// map's absolute scale is arbitrary. Falls back to zRefM when the local window
+// has nothing plausible (est = true).
+function sampleDepthNearRef(depth, x, y, zRefM, tolPct) {
+  if (x == null || y == null) return null;
+  const { data, width, height } = depth;
+  const [dx, dy] = imgToDepthXY(depth, x, y);   // image px -> depth indices
+  const cx = Math.round(dx), cy = Math.round(dy);
+  if (cx < 0 || cy < 0 || cx >= width || cy >= height) return null;
+  const pct = (tolPct != null ? tolPct : state.depth.tolPct) / 100;
+  const tolM = (zRefM != null) ? Math.abs(zRefM) * pct : Infinity;
+  for (const r of [3, 7, 12]) {
+    const vals = [];
+    for (let yy = Math.max(0, cy - r); yy <= Math.min(height - 1, cy + r); yy++) {
+      const row = yy * width;
+      for (let xx = Math.max(0, cx - r); xx <= Math.min(width - 1, cx + r); xx++) {
+        const v = data[row + xx];
+        if (v <= 0) continue;
+        const m = depthValToM(depth, v);
+        if (zRefM != null && Math.abs(m - zRefM) > tolM) continue;
+        vals.push(m);
+      }
+    }
+    if (vals.length >= 5) {
+      vals.sort((a, b) => a - b);
+      return { m: vals[vals.length >> 1], est: r > 3 };
+    }
+  }
+  return zRefM != null ? { m: zRefM, est: true } : null;
+}
+
+// Extent of the mask polygon projected on the tip->base axis direction,
+// converted to mm at the boll's reference depth. A dense, keypoint-drift-free
+// second opinion on the boll's length (only the axis *direction* comes from
+// the keypoints, which is much more stable than their exact positions).
+function maskAxisLengthMM(d, intr, zRefM) {
+  const poly = d.mask_poly;
+  if (!poly || poly.length < 3 || zRefM == null) return null;
+  const kpts = d.kpts || [], tip = kpts[0], base = kpts[1];
+  if (!tip || !base) return null;
+  let ux = base[0] - tip[0], uy = base[1] - tip[1];
+  const n = Math.hypot(ux, uy);
+  if (!(n > 1e-6)) return null;
+  ux /= n; uy /= n;
+  let lo = Infinity, hi = -Infinity;
+  for (const [x, y] of poly) {
+    const t = x * ux + y * uy;
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  const f = (intr.fx + intr.fy) / 2;
+  return (hi - lo) * zRefM / f * 1000;
+}
+
+// 3-D tip<->base distance via pinhole deprojection with color intrinsics.
+// Keypoint depths are constrained to the mask-median boll depth (relative %), and
+// the keypoint-based length is cross-checked against the mask's axis extent:
+// when they disagree by >30% (keypoint drift), the mask extent is used instead.
+// Returns { mm (fused), mmKpt, maskMm, ok, tipM, baseM, zBollM, est } or null.
+function bollHeight3D(d, depth) {
+  const kpts = d.kpts || [];
+  const tip = kpts[0], base = kpts[1];
+  const kT = state.filters.kptConfMin;
+  if (!tip || !base || (tip[2] ?? 0) < kT || (base[2] ?? 0) < kT) return null;
+  const intr = state.depth.meta?.intrinsics;
+  if (!intr) return null;
+  const ds = bollDepthStats(d, depth);
+  const zRef = ds ? ds.zMedM : null;
+  const zt = sampleDepthNearRef(depth, tip[0], tip[1], zRef);
+  const zb = sampleDepthNearRef(depth, base[0], base[1], zRef);
+  if (!zt || !zb) return null;
+  const P = (u, v, z) => [(u - intr.ppx) * z / intr.fx, (v - intr.ppy) * z / intr.fy, z];
+  const a = P(tip[0], tip[1], zt.m);
+  const b = P(base[0], base[1], zb.m);
+  const mmKpt = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000;
+  const maskMm = maskAxisLengthMM(d, intr, zRef);
+  const ratio = maskMm ? mmKpt / maskMm : null;
+  const kptTrusted = !(zt.est || zb.est) && (ratio == null || (ratio >= 0.7 && ratio <= 1.3));
+  return {
+    mm: (kptTrusted || maskMm == null) ? mmKpt : maskMm,   // fused value
+    mmKpt, maskMm,
+    ok: kptTrusted,                                        // QC flag for the report
+    tipM: zt.m, baseM: zb.m,
+    zBollM: zRef != null ? zRef : (zt.m + zb.m) / 2,       // camera -> boll distance
+    est: zt.est || zb.est || !kptTrusted,
+  };
+}
+
+// ---- temporal smoothing ------------------------------------------------------
+// Rolling median of the last SMOOTH_WIN raw measurements per track: kills
+// single-frame jitter without the lag of an exponential average.
+const SMOOTH_WIN = 5;
+const measureHist = new Map();   // trackKey -> Map(frameIdx -> raw mm)
+
+// True median of a sorted array (averages the two middle values for even n —
+// a 2-sample "median" must not just pick the larger one).
+function medianOf(sortedVals) {
+  const m = sortedVals.length >> 1;
+  return sortedVals.length % 2 ? sortedVals[m] : (sortedVals[m - 1] + sortedVals[m]) / 2;
+}
+
+function trackKeyOf(d, idx) { return d.track_id != null ? "t" + d.track_id : "i" + idx; }
+
+function recordMeasure(key, frameIdx, mm) {
+  let h = measureHist.get(key);
+  if (!h) { h = new Map(); measureHist.set(key, h); }
+  h.set(frameIdx, mm);
+}
+
+function smoothedMeasure(key, frameIdx) {
+  const h = measureHist.get(key);
+  if (!h) return null;
+  const vals = [];
+  for (let i = frameIdx - SMOOTH_WIN + 1; i <= frameIdx; i++) {
+    const v = h.get(i);
+    if (v != null) vals.push(v);
+  }
+  if (!vals.length) return null;
+  vals.sort((a, b) => a - b);
+  return medianOf(vals);
+}
+
+// ---- pixel-space measurements (no depth, no intrinsics) ---------------------
+// Available on every frame, immediately. Pixel size is NOT physical size: the
+// same boll twice as far away measures half as many pixels. Only comparable
+// between bolls at the same distance. Multiply by (Z / f) to get metres once
+// depth and focal length are known.
+function tipBasePx(d) {
+  const kpts = d.kpts || [], tip = kpts[0], base = kpts[1];
+  const kT = state.filters.kptConfMin;
+  if (!tip || !base || (tip[2] ?? 0) < kT || (base[2] ?? 0) < kT) return null;
+  return Math.hypot(tip[0] - base[0], tip[1] - base[1]);
+}
+
+// Mask extent along the tip->base axis, in px. Same idea as maskAxisLengthMM but
+// without the depth/intrinsics conversion — only the axis DIRECTION comes from
+// the keypoints, so it is far less sensitive to keypoint drift than tipBasePx.
+function maskAxisPx(d) {
+  const poly = d.mask_poly;
+  if (!poly || poly.length < 3) return null;
+  const kpts = d.kpts || [], tip = kpts[0], base = kpts[1];
+  if (!tip || !base) return null;
+  let ux = base[0] - tip[0], uy = base[1] - tip[1];
+  const n = Math.hypot(ux, uy);
+  if (!(n > 1e-6)) return null;
+  ux /= n; uy /= n;
+  let lo = Infinity, hi = -Infinity, wlo = Infinity, whi = -Infinity;
+  for (const [x, y] of poly) {
+    const t = x * ux + y * uy;             // along the axis
+    const w = -x * uy + y * ux;            // perpendicular to it
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+    if (w < wlo) wlo = w;
+    if (w > whi) whi = w;
+  }
+  return { lengthPx: hi - lo, widthPx: whi - wlo };
+}
+
+function maskAreaPx(d) {
+  const poly = d.mask_poly;
+  if (!poly || poly.length < 3) return null;
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+  }
+  return Math.abs(a / 2);                  // shoelace
+}
+
+// A run is CALIBRATED when its metadata says the maps are metric. Only then
+// are the numbers real millimetres; otherwise they keep the old "u" label,
+// because they share one unknown constant and only ratios mean anything.
+function isCalibrated(meta) {
+  if (!meta) return false;
+  if (meta.units === "meters" || meta.units === "metres" || meta.calibration) return true;
+  // RealSense-style: raw units + a declared scale to metres is just as metric as
+  // a fitted calibration -- the sizes come out in mm either way.
+  return !!meta.depth_scale && /met(er|re)/i.test(meta.depth_units || "");
+}
+// Unit suffix for every depth-derived readout.
+function U() { return state.depth.calibrated ? "mm" : "u"; }
+
+function setDepthMeta(meta) {
+  state.depth.meta = meta;
+  state.depth.calibrated = isCalibrated(meta);
+  if (meta.depth_scale) state.depth.depthScale = meta.depth_scale;
+  state.depth.colorCache.clear();
+  const ru = document.getElementById("depth-range-unit");
+  if (ru) ru.textContent = U();
+  updateDepthStatus();
+}
+
+function ingestDepth(npyEntries) {
+  for (const e of npyEntries) state.depth.filesByStem.set(stemOf(e.name), e.file);
+  state.depth.cache.clear();
+  state.depth.colorCache.clear();
+  state.depth.cacheOrder.length = 0;
+  depthPending.clear();
+  updateDepthStatus();
+}
+
+function updateDepthStatus() {
+  const el = document.getElementById("depth-status");
+  if (!el) return;
+  const n = state.depth.filesByStem.size;
+  if (!n) {
+    el.innerHTML = `No depth loaded. Click "Load depth" and pick the <b>depth/</b> folder of .npy maps.
+      <code>metadata.json</code> (intrinsics) and <code>crop_info.json</code> (top-crop
+      offset) are picked up automatically from any selection that contains them.`;
+    return;
+  }
+  const intr = state.depth.meta?.intrinsics;
+  const yOff = state.depth.cropTopPx || 0;
+  el.innerHTML = `<b>${n}</b> depth map(s) · intrinsics `
+    + (intr ? `✓ fx=${intr.fx.toFixed(1)} fy=${intr.fy.toFixed(1)}`
+            : `✗ — load <code>metadata.json</code> for sizes`)
+    + (yOff ? ` · <b>top crop ${yOff}px</b> (crop_info.json)`
+            : ` · no crop offset`);
+}
+
+function updateDepthLegend(cc) {
+  const leg = document.getElementById("depth-legend");
+  if (!cc || !state.depth.enabled) { leg.style.display = "none"; return; }
+  leg.style.display = "block";
+  document.getElementById("depth-tick-min").textContent = (cc.minM * 1000).toFixed(0) + " " + U();
+  document.getElementById("depth-tick-mid").textContent = ((cc.minM + cc.maxM) * 50).toFixed(0);
+  document.getElementById("depth-tick-max").textContent = (cc.maxM * 1000).toFixed(0) + " " + U();
+}
+
+// Draws the depth overlay (called from render(), between image and detections).
+// Also triggers the lazy async load; re-renders when the map arrives.
+function drawDepthOverlay(f, visible) {
+  if (!depthWanted(f.stem)) { updateDepthLegend(null); return; }
+  const cached = state.depth.cache.get(f.stem);
+  if (!cached) {
+    // Fallback path (e.g. depth toggled on mid-frame): load, then redraw once.
+    // Keep the previous legend visible to avoid it flickering in and out.
+    if (!depthPending.has(f.stem)) {
+      depthPending.add(f.stem);
+      getDepth(f).then(() => {
+        depthPending.delete(f.stem);
+        if (state.frames[state.current] === f) { render(); renderDetails(); renderFrameStats(); }
+      });
+    }
+    return;
+  }
+  if (!state.depth.enabled) { updateDepthLegend(null); return; }  // heights only, no overlay
+  const cc = colorizeDepth(f, cached);
+  ctx.save();
+  ctx.globalAlpha = state.depth.alpha;
+  if (state.depth.mode === "bolls") {
+    ctx.beginPath();
+    let any = false;
+    for (const { d } of visible) {
+      const poly = d.mask_poly;
+      if (!poly || poly.length < 3) continue;
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+      ctx.closePath();
+      any = true;
+    }
+    // Stretch depth over the region it actually covers: full width, and the
+    // frame below the crop offset (0 when no crop is in play).
+    const yOff = depthCropTop();
+    if (any) { ctx.clip(); ctx.drawImage(cc.canvas, 0, yOff, cv.width, cv.height - yOff); }
+  } else {
+    const yOff = depthCropTop();
+    ctx.drawImage(cc.canvas, 0, yOff, cv.width, cv.height - yOff);
+  }
+  ctx.restore();
+  updateDepthLegend(cc);
+}
+
+// =============================================================================
+//   DOM
+// =============================================================================
+const $ = (id) => document.getElementById(id);
+const cv = $("cv");
+const ctx = cv.getContext("2d");
+const emptyState = $("empty-state");
+const toast = $("toast");
+const loadingBar = $("loading-bar");
+
+// =============================================================================
+//   LOADING
+// =============================================================================
+async function pickFolder(role) {
+  // role = "frames" | "dets"
+  let entries;
+  if (window.showDirectoryPicker) {
+    try {
+      const dir = await window.showDirectoryPicker();
+      entries = await collectFromHandle(dir);
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      showToast("Folder picker error: " + e.message, "err");
+      return;
+    }
+  } else {
+    // Fallback for older browsers: input[type=file] webkitdirectory
+    entries = await collectViaInput();
+    if (!entries) return;
+  }
+  await ingestEntries(entries, role);
+}
+
+async function collectFromHandle(dirHandle, basePath = "") {
+  const out = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === "directory") {
+      const sub = await collectFromHandle(handle, basePath + name + "/");
+      out.push(...sub);
+    } else if (handle.kind === "file") {
+      const f = await handle.getFile();
+      out.push({ name, path: basePath + name, file: f });
+    }
+  }
+  return out;
+}
+
+function collectViaInput() {
+  return new Promise((resolve) => {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.multiple = true;
+    inp.webkitdirectory = true;
+    inp.addEventListener("change", () => {
+      const arr = [];
+      for (const f of inp.files) {
+        arr.push({ name: f.name, path: f.webkitRelativePath || f.name, file: f });
+      }
+      resolve(arr);
+    });
+    inp.addEventListener("cancel", () => resolve(null));
+    inp.click();
+  });
+}
+
+function extOf(name) {
+  const m = name.toLowerCase().match(/\.([^.]+)$/);
+  return m ? m[1] : "";
+}
+function stemOf(name) {
+  return name.replace(/\.[^.]+$/, "");
+}
+
+// Sidecars describe the DEPTH, not the detections: metadata.json (intrinsics)
+// and crop_info.json (top-crop offset). They are recognised by name and ingested
+// from whichever picker was used, so putting them beside the .npy maps works as
+// naturally as putting them beside the detection JSONs.
+const DEPTH_SIDECARS = new Set(["metadata.json", "crop_info.json"]);
+function isSidecar(name) {
+  return DEPTH_SIDECARS.has(name.toLowerCase().split("/").pop());
+}
+
+async function ingestEntries(entries, role) {
+  setLoading(0);
+  const imageEntries = entries.filter(e => IMG_EXTS.has(extOf(e.name)));
+  const allJson = entries.filter(e => extOf(e.name) === "json");
+  const sidecarEntries = allJson.filter(e => isSidecar(e.name));
+  const jsonEntries = allJson.filter(e => !isSidecar(e.name));
+  const npyEntries = entries.filter(e => extOf(e.name) === "npy");
+
+  // Sidecars first, so a depth ingest in the same selection already knows the
+  // crop offset and does not have to invalidate its cache afterwards.
+  let didSidecar = false;
+  if (sidecarEntries.length) {
+    await ingestDetections(sidecarEntries);
+    didSidecar = true;
+  }
+
+  // Heuristic: if role is "frames" but the folder contains BOTH images and JSONs,
+  // ingest both — common case where infer_v3.py output is shown alongside source frames.
+  let didImages = false, didDets = false;
+
+  if (role === "frames" && imageEntries.length) {
+    await ingestImages(imageEntries);
+    didImages = true;
+  }
+  if (role === "dets" && jsonEntries.length) {
+    await ingestDetections(jsonEntries);
+    didDets = true;
+  }
+  // Convenience: if you picked one folder and it has both, load both.
+  if (role === "frames" && jsonEntries.length && !didDets) {
+    await ingestDetections(jsonEntries);
+    didDets = true;
+  }
+  if (role === "dets" && imageEntries.length && !didImages && state.frames.length === 0) {
+    await ingestImages(imageEntries);
+    didImages = true;
+  }
+  // Depth .npy maps are ingested from any selection that contains them.
+  let didDepth = false;
+  if (npyEntries.length) {
+    ingestDepth(npyEntries);
+    didDepth = true;
+  }
+
+  setLoading(null);
+
+  const msg = [];
+  if (didSidecar) msg.push(`${sidecarEntries.length} depth sidecar(s)`);
+  if (didImages) msg.push(`${imageEntries.length} frame(s)`);
+  if (didDets)   msg.push(`${jsonEntries.length} detection file(s)`);
+  if (didDepth)  msg.push(`${npyEntries.length} depth map(s)`);
+  if (msg.length === 0) {
+    showToast("No image or JSON files found in selection.", "err");
+    return;
+  }
+  showToast("Loaded " + msg.join(" + "), "ok");
+  updateAfterLoad();
+}
+
+async function ingestImages(imageEntries) {
+  // Build/extend state.frames in sorted order by path stem.
+  imageEntries.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+  const newFrames = [];
+  let i = 0;
+  for (const e of imageEntries) {
+    const stem = stemOf(e.name);
+    if (state.framesIndexByStem.has(stem)) {
+      // Update existing
+      const idx = state.framesIndexByStem.get(stem);
+      const url = URL.createObjectURL(e.file);
+      state.frames[idx].imageUrl = url;
+      state.frames[idx].imageLoaded = false;
+    } else {
+      const url = URL.createObjectURL(e.file);
+      newFrames.push({
+        name: e.name, stem, path: e.path,
+        imageUrl: url, imageLoaded: false, image: null,
+        width: 0, height: 0,
+        detections: [],
+      });
+    }
+    i++;
+    if (i % 25 === 0) setLoading(i / imageEntries.length * 0.4);
+  }
+  for (const f of newFrames) {
+    state.frames.push(f);
+    state.framesIndexByStem.set(f.stem, state.frames.length - 1);
+  }
+  // Sort frames by stem (natural sort) — keeps index stable across loads.
+  state.frames.sort((a, b) => a.stem.localeCompare(b.stem, undefined, { numeric: true }));
+  state.framesIndexByStem.clear();
+  state.frames.forEach((f, idx) => state.framesIndexByStem.set(f.stem, idx));
+}
+
+async function ingestDetections(jsonEntries) {
+  let n = 0;
+  for (const e of jsonEntries) {
+    try {
+      const text = await e.file.text();
+      const data = JSON.parse(text);
+      const stem = stemOf(e.name);
+      // Extraction metadata (intrinsics + depth scale) — not a detection file.
+      if (data && !Array.isArray(data) && data.intrinsics && data.depth_scale != null) {
+        setDepthMeta(data);
+        n++;
+        continue;
+      }
+      // crop_info.json from run_da3_depth.py --crop_top_frac: the depth maps
+      // cover only the frame BELOW this offset, so every lookup must shift.
+      if (data && !Array.isArray(data) && data.crop_top_px != null) {
+        state.depth.cropTopPx = Number(data.crop_top_px) || 0;
+        state.depth.cache.clear(); state.depth.colorCache.clear();
+        measureHist.clear();
+        console.log("[crop_info] depth offset by", state.depth.cropTopPx, "px");
+        updateDepthStatus();
+        n++;
+        continue;
+      }
+      // Two valid shapes:
+      //   (a) image-mode: list of per-boll records           -> attach to frame named <stem>
+      //   (b) video-mode: list of {frame, src, bolls: [...]} -> create one frame per element
+      if (Array.isArray(data) && data.length && data[0] && Array.isArray(data[0].bolls)) {
+        // video-mode JSON
+        for (const rec of data) {
+          // src may be set; fall back to <stem>_<frame_idx>
+          const fStem = rec.src ? stemOf(rec.src.split("/").pop().split("\\").pop())
+                                : `${stem}_${String(rec.frame).padStart(6, "0")}`;
+          let idx = state.framesIndexByStem.get(fStem);
+          if (idx === undefined) {
+            state.frames.push({
+              name: fStem, stem: fStem, path: fStem,
+              imageUrl: null, imageLoaded: false, image: null,
+              width: 0, height: 0, detections: [],
+            });
+            idx = state.frames.length - 1;
+            state.framesIndexByStem.set(fStem, idx);
+          }
+          state.frames[idx].detections = rec.bolls;
+        }
+      } else if (Array.isArray(data)) {
+        // image-mode JSON (flat per-boll list)
+        let idx = state.framesIndexByStem.get(stem);
+        if (idx === undefined) {
+          state.frames.push({
+            name: stem, stem, path: stem,
+            imageUrl: null, imageLoaded: false, image: null,
+            width: 0, height: 0, detections: data,
+          });
+          state.framesIndexByStem.set(stem, state.frames.length - 1);
+        } else {
+          state.frames[idx].detections = data;
+        }
+      }
+      n++;
+      if (n % 25 === 0) setLoading(0.4 + n / jsonEntries.length * 0.5);
+    } catch (err) {
+      console.warn("Failed to parse", e.name, err);
+    }
+  }
+  // Re-sort and rebuild index after potentially adding new frames.
+  state.frames.sort((a, b) => a.stem.localeCompare(b.stem, undefined, { numeric: true }));
+  state.framesIndexByStem.clear();
+  state.frames.forEach((f, idx) => state.framesIndexByStem.set(f.stem, idx));
+}
+
+function updateAfterLoad() {
+  if (state.frames.length === 0) return;
+  emptyState.style.display = "none";
+  state.current = Math.min(state.current, state.frames.length - 1);
+  $("scrub").max = String(state.frames.length - 1);
+  $("scrub").value = String(state.current);
+  goToFrame(state.current, true);
+  updateHeaderStats();
+}
+
+function updateHeaderStats() {
+  const n = state.frames.length;
+  const withDet = state.frames.filter(f => f.detections.length > 0).length;
+  const withImg = state.frames.filter(f => f.imageUrl).length;
+  const nDepth = state.depth.filesByStem.size;
+  $("stats").innerHTML = `<b>${n}</b> frame(s) · <b>${withImg}</b> with image · <b>${withDet}</b> with detections`
+    + (nDepth ? ` · <b>${nDepth}</b> depth` : "");
+}
+
+// =============================================================================
+//   IMAGE LOAD (lazy)
+// =============================================================================
+async function ensureImageLoaded(frame) {
+  if (frame.imageLoaded || !frame.imageUrl) return;
+  await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      frame.image = img;
+      frame.width = img.naturalWidth;
+      frame.height = img.naturalHeight;
+      frame.imageLoaded = true;
+      resolve();
+    };
+    img.onerror = () => { frame.imageLoaded = true; resolve(); };
+    img.src = frame.imageUrl;
+  });
+}
+
+// =============================================================================
+//   RENDERING
+// =============================================================================
+function passesFilter(d) {
+  const dc = d.det_conf ?? 0;
+  if (dc < state.filters.confMin) return false;
+  const v = d.visfrac;
+  if (v != null && v < state.filters.visMin) return false;
+  const cls = d.occ_class ?? "_noaux";
+  if (!state.filters.classes.has(cls)) return false;
+  return true;
+}
+
+function colorFor(d) {
+  return COLOR_BY_CLASS[d.occ_class ?? "_noaux"] || COLOR_BY_CLASS["_noaux"];
+}
+
+function centroidOf(d) {
+  if (d.mask_poly && d.mask_poly.length) {
+    let sx = 0, sy = 0;
+    for (const [x, y] of d.mask_poly) { sx += x; sy += y; }
+    return [sx / d.mask_poly.length, sy / d.mask_poly.length];
+  }
+  if (d.bbox) {
+    return [d.bbox[0] + d.bbox[2] / 2, d.bbox[1] + d.bbox[3] / 2];
+  }
+  return null;
+}
+
+function drawTrails(ctx, currentIdx, length, lw) {
+  // Walk back `length` frames, group detections by track_id, draw a
+  // fading polyline from oldest to newest. Only detections with a
+  // track_id show a trail; detections without one are skipped.
+  const start = Math.max(0, currentIdx - length);
+  // track_id -> [{idx, [x, y], color}]
+  const byTrack = new Map();
+  for (let i = start; i <= currentIdx; i++) {
+    const fr = state.frames[i];
+    if (!fr || !fr.detections) continue;
+    for (const d of fr.detections) {
+      if (d.track_id == null) continue;
+      if (!passesFilter(d)) continue;
+      const c = centroidOf(d);
+      if (!c) continue;
+      if (!byTrack.has(d.track_id)) byTrack.set(d.track_id, []);
+      byTrack.get(d.track_id).push({ idx: i, pt: c, color: colorFor(d) });
+    }
+  }
+  ctx.save();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const trailLw = Math.max(2, lw * 1.2);
+  for (const points of byTrack.values()) {
+    if (points.length < 2) continue;
+    // Draw segments with fading alpha (newest segment most opaque).
+    for (let k = 1; k < points.length; k++) {
+      const a = points[k - 1], b = points[k];
+      // alpha based on distance from current frame
+      const distFromNow = currentIdx - b.idx;
+      const alpha = Math.max(0.08, 1.0 - distFromNow / Math.max(1, length));
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = trailLw;
+      ctx.beginPath();
+      ctx.moveTo(a.pt[0], a.pt[1]);
+      ctx.lineTo(b.pt[0], b.pt[1]);
+      ctx.stroke();
+    }
+    // Small dot at the current centroid (head of the trail)
+    const last = points[points.length - 1];
+    if (last.idx === currentIdx) {
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = last.color;
+      ctx.beginPath();
+      ctx.arc(last.pt[0], last.pt[1], Math.max(3, trailLw * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function pointInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function pointInBbox(px, py, [x, y, w, h]) {
+  return px >= x && py >= y && px <= x + w && py <= y + h;
+}
+
+function fitCanvas(frame) {
+  // Canvas pixel buffer is always the native image size. Visual sizing +
+  // panning is done with CSS transform so the buffer stays sharp at any zoom.
+  const W = frame.width || cv.width;
+  const H = frame.height || cv.height;
+  if (cv.width !== W || cv.height !== H) {
+    cv.width = W;
+    cv.height = H;
+  }
+  cv.style.width  = W + "px";
+  cv.style.height = H + "px";
+
+  // When in fit-to-window mode, recompute zoom + center on every frame.
+  if (state.view.fitToWindow) {
+    const wrap = cv.parentElement;
+    const wrapW = wrap.clientWidth;
+    const wrapH = wrap.clientHeight;
+    state.view.zoom = Math.min(wrapW / W, wrapH / H, 1);   // never enlarge in fit mode
+    state.view.panX = (wrapW - W * state.view.zoom) / 2;
+    state.view.panY = (wrapH - H * state.view.zoom) / 2;
+  }
+  applyTransform();
+}
+
+function applyTransform() {
+  const z = state.view.zoom;
+  const px = state.view.panX;
+  const py = state.view.panY;
+  cv.style.transform = `translate(${px}px, ${py}px) scale(${z})`;
+  const zd = document.getElementById("zoom-display");
+  if (zd) zd.textContent = `${Math.round(z * 100)}%`;
+  // Cursor hint: grabbable when not in fit mode
+  if (state.view.fitToWindow) {
+    cv.classList.remove("zoomed");
+  } else {
+    cv.classList.add("zoomed");
+  }
+}
+
+function setZoomAtPoint(newZoom, cursorWrapX, cursorWrapY) {
+  // Anchor newZoom so the image pixel under (cursorWrapX, cursorWrapY) — both
+  // in canvas-wrap coords — stays under the cursor after the zoom change.
+  const z1 = state.view.zoom;
+  newZoom = Math.max(0.05, Math.min(20, newZoom));
+  // image pixel currently under the cursor
+  const imgX = (cursorWrapX - state.view.panX) / z1;
+  const imgY = (cursorWrapY - state.view.panY) / z1;
+  state.view.panX = cursorWrapX - imgX * newZoom;
+  state.view.panY = cursorWrapY - imgY * newZoom;
+  state.view.zoom = newZoom;
+  state.view.fitToWindow = false;
+  const fitToggle = document.getElementById("t-fit");
+  if (fitToggle) fitToggle.checked = false;
+  applyTransform();
+}
+
+function resetToFit() {
+  state.view.fitToWindow = true;
+  const fitToggle = document.getElementById("t-fit");
+  if (fitToggle) fitToggle.checked = true;
+  render(); // fitCanvas inside render() will recompute
+}
+
+function setZoomFromCenter(newZoom) {
+  const wrap = cv.parentElement;
+  setZoomAtPoint(newZoom, wrap.clientWidth / 2, wrap.clientHeight / 2);
+}
+
+function render() {
+  const f = state.frames[state.current];
+  if (!f) return;
+  fitCanvas(f);
+
+  // Background: image OR dark fill if no image available.
+  if (f.image) {
+    ctx.drawImage(f.image, 0, 0, cv.width, cv.height);
+  } else {
+    ctx.fillStyle = "#11151c";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#374055";
+    ctx.font = `${Math.max(14, cv.width / 80)}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("(no source image for this frame)", cv.width / 2, cv.height / 2);
+  }
+
+  const dets = (f.detections || []).map((d, i) => ({ d, i, ok: passesFilter(d) }));
+  const visible = dets.filter(x => x.ok);
+
+  const lw = Math.max(2, Math.min(cv.width, cv.height) / 600);
+  const fs = Math.max(11, Math.min(cv.width, cv.height) / 60);
+
+  // 0) Depth overlay (drawn over the image, under detection graphics)
+  drawDepthOverlay(f, visible);
+
+  // 0.5) Centroid trails (drawn behind detection overlays)
+  if (state.layers.trails) {
+    drawTrails(ctx, state.current, state.view.trailLen, lw);
+  }
+
+  // 1) Mask fills (alpha)
+  if (state.layers.maskFill) {
+    ctx.save();
+    ctx.globalAlpha = state.view.maskAlpha;
+    for (const { d } of visible) {
+      const poly = d.mask_poly;
+      if (!poly || poly.length < 3) continue;
+      ctx.fillStyle = colorFor(d);
+      ctx.beginPath();
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 2) Per-detection overlays
+  for (const { d, i } of visible) {
+    const color = colorFor(d);
+    const isSel = (state.selectedBollIdx === i);
+    const dimmed = state.view.dimUnselected && state.selectedBollIdx != null && !isSel;
+    ctx.save();
+    ctx.globalAlpha = dimmed ? 0.25 : 1.0;
+
+    // Mask outline
+    if (state.layers.maskOutline && d.mask_poly && d.mask_poly.length >= 3) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSel ? lw * 2 : lw;
+      ctx.beginPath();
+      ctx.moveTo(d.mask_poly[0][0], d.mask_poly[0][1]);
+      for (let k = 1; k < d.mask_poly.length; k++) ctx.lineTo(d.mask_poly[k][0], d.mask_poly[k][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Bbox
+    if (state.layers.bbox && d.bbox) {
+      const [x, y, w, h] = d.bbox;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSel ? lw * 2 : lw;
+      ctx.setLineDash(isSel ? [] : []);
+      ctx.strokeRect(x, y, w, h);
+    }
+
+    // Keypoints + axis. kpts[i][2] is per-kpt confidence (continuous).
+    // >= kptConfMin -> filled (model committed). 0 < x < kptConfMin -> hollow (guessed).
+    const kpts = d.kpts || [];
+    const tip = kpts[0]; const base = kpts[1];
+    const kThresh = state.filters.kptConfMin;
+    const tipConf = tip ? tip[2] : 0;
+    const baseConf = base ? base[2] : 0;
+    const tipShow = tip && tipConf > 0;
+    const baseShow = base && baseConf > 0;
+    const tipCommitted = tipConf >= kThresh;
+    const baseCommitted = baseConf >= kThresh;
+    if (state.layers.axis && tipCommitted && baseCommitted) {
+      ctx.strokeStyle = COLOR_AXIS;
+      ctx.lineWidth = Math.max(1, lw * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(tip[0], tip[1]);
+      ctx.lineTo(base[0], base[1]);
+      ctx.stroke();
+    }
+    const kr = Math.max(5, lw * 2.2);
+    if (state.layers.tip && tipShow) {
+      ctx.beginPath(); ctx.arc(tip[0], tip[1], kr, 0, Math.PI * 2);
+      if (tipCommitted) {
+        ctx.fillStyle = COLOR_TIP; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
+      } else {
+        ctx.strokeStyle = COLOR_TIP; ctx.lineWidth = Math.max(1.5, lw * 0.7);
+        ctx.stroke();
+      }
+    }
+    if (state.layers.base && baseShow) {
+      ctx.beginPath(); ctx.arc(base[0], base[1], kr, 0, Math.PI * 2);
+      if (baseCommitted) {
+        ctx.fillStyle = COLOR_BASE; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
+      } else {
+        ctx.strokeStyle = COLOR_BASE; ctx.lineWidth = Math.max(1.5, lw * 0.7);
+        ctx.stroke();
+      }
+    }
+
+    // Depth-derived 3-D size chip (tip↔base, 5-frame median) + camera distance
+    if (state.depth.showHeights && tipCommitted && baseCommitted) {
+      const dd = state.depth.cache.get(f.stem);
+      const h3 = dd ? bollHeight3D(d, dd) : null;
+      if (h3) {
+        const mKey = trackKeyOf(d, i);
+        recordMeasure(mKey, state.current, h3.mm);
+        const sm = smoothedMeasure(mKey, state.current) ?? h3.mm;
+        const midX = (tip[0] + base[0]) / 2, midY = (tip[1] + base[1]) / 2;
+        const txt = `${sm.toFixed(0)}${U()}${h3.est ? "≈" : ""} · z${(h3.zBollM * 1000).toFixed(0)}${U()}`;
+        ctx.font = `600 ${Math.max(10, fs * 0.85)}px ui-monospace, "SF Mono", monospace`;
+        const tw2 = ctx.measureText(txt).width;
+        const th2 = fs * 0.9;
+        const hx = midX + kr + 5, hy = midY - th2 / 2;
+        ctx.fillStyle = "rgba(0,0,0,0.75)";
+        ctx.fillRect(hx - 4, hy - 3, tw2 + 9, th2 + 6);
+        ctx.strokeStyle = COLOR_AXIS; ctx.lineWidth = 1;
+        ctx.strokeRect(hx - 4, hy - 3, tw2 + 9, th2 + 6);
+        ctx.fillStyle = "#ffffff";
+        ctx.textBaseline = "top"; ctx.textAlign = "left";
+        ctx.fillText(txt, hx, hy);
+      }
+    }
+
+    // Track-id chip (top-right of bbox)
+    if (state.layers.trackId && d.track_id != null && d.bbox) {
+      const tag = `#${d.track_id}`;
+      ctx.font = `600 ${Math.max(10, fs * 0.85)}px ui-monospace, "SF Mono", monospace`;
+      const tw_ = ctx.measureText(tag).width;
+      const th_ = fs * 0.85;
+      const [bx_, by_, bw_, bh_] = d.bbox;
+      const cx0 = bx_ + bw_ - tw_ - 8;
+      const cy0 = by_;
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(cx0 - 4, cy0, tw_ + 8, th_ + 6);
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, lw / 2);
+      ctx.strokeRect(cx0 - 4, cy0, tw_ + 8, th_ + 6);
+      ctx.fillStyle = color;
+      ctx.textBaseline = "top"; ctx.textAlign = "left";
+      ctx.fillText(tag, cx0, cy0 + 3);
+    }
+
+    // Label
+    if (state.layers.label && d.bbox) {
+      const parts = [];
+      if (state.layers.lblCls && d.occ_class != null)
+        parts.push(`${d.occ_class} ${(d.occ_class_conf ?? 0).toFixed(2)}`);
+      if (state.layers.lblV && d.visfrac != null)
+        parts.push(`v=${d.visfrac.toFixed(2)}`);
+      if (state.layers.lblD && d.det_conf != null)
+        parts.push(`d=${d.det_conf.toFixed(2)}`);
+      const text = parts.join(" | ");
+      if (text) {
+        ctx.font = `600 ${fs}px -apple-system, "Segoe UI", sans-serif`;
+        const tw = ctx.measureText(text).width;
+        const th = fs * 1.25;
+        const [bx, by] = d.bbox;
+        const lx = bx;
+        const ly = Math.max(th + 2, by - 4);
+        ctx.fillStyle = color;
+        ctx.fillRect(lx, ly - th, tw + 10, th + 4);
+        ctx.fillStyle = "#06121f";
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = "left";
+        ctx.fillText(text, lx + 5, ly - 2);
+      }
+    }
+    ctx.restore();
+  }
+
+  // Frame info overlay (top-left of canvas)
+  const tag = `${f.stem}   ·   ${state.current + 1}/${state.frames.length}   ·   ${visible.length}/${(f.detections||[]).length} bolls`;
+  ctx.save();
+  ctx.font = `12px ui-monospace, "SF Mono", monospace`;
+  ctx.textBaseline = "top"; ctx.textAlign = "left";
+  const pad = 6;
+  const tw = ctx.measureText(tag).width;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(8, 8, tw + pad * 2, 12 + pad * 2);
+  ctx.fillStyle = "#e6ecf5";
+  ctx.fillText(tag, 8 + pad, 8 + pad);
+  ctx.restore();
+
+  // Live measurement plot: sample the tracked boll for this frame + redraw.
+  updatePlotForCurrentFrame();
+}
+
+// =============================================================================
+//   NAVIGATION + PLAYBACK
+// =============================================================================
+let gotoSeq = 0; // guards against overlapping async navigations rendering out of order
+async function goToFrame(idx, force = false) {
+  if (state.frames.length === 0) return;
+  idx = Math.max(0, Math.min(state.frames.length - 1, idx));
+  if (idx === state.current && !force) return;
+  state.current = idx;
+  state.selectedBollIdx = null;
+  const seq = ++gotoSeq;
+  const f = state.frames[idx];
+  if (f.imageUrl) await ensureImageLoaded(f);
+  // Await depth BEFORE the first paint so the overlay doesn't pop in a beat
+  // after the RGB frame (this was the source of playback flicker).
+  if (depthWanted(f.stem)) await getDepth(f);
+  if (seq !== gotoSeq) return; // a newer navigation superseded this one
+  $("scrub").value = String(idx);
+  $("counter").innerHTML = `<b>${idx + 1}</b> / ${state.frames.length}`;
+  // pre-load neighbors (image + depth) so playback stays smooth
+  for (const nf of [state.frames[idx + 1], state.frames[idx + 2]]) {
+    if (!nf) continue;
+    if (nf.imageUrl) ensureImageLoaded(nf);
+    if (depthWanted(nf.stem)) getDepth(nf);
+  }
+  render();
+  renderDetails();
+  renderFrameStats();
+}
+
+function play() {
+  if (state.playing) return;
+  state.playing = true;
+  $("play-btn").textContent = "⏸";
+  state.lastFrameTime = performance.now();
+  requestAnimationFrame(playLoop);
+}
+function pause() {
+  state.playing = false;
+  $("play-btn").textContent = "▶";
+}
+function togglePlay() { state.playing ? pause() : play(); }
+
+function playLoop(t) {
+  if (!state.playing) return;
+  const dt = t - state.lastFrameTime;
+  const interval = 1000 / (state.baseFps * state.speed);
+  if (dt >= interval) {
+    state.lastFrameTime = t - (dt - interval); // keep accumulated phase
+    let next = state.current + 1;
+    if (next >= state.frames.length) {
+      next = 0; // loop
+    }
+    goToFrame(next);
+  }
+  requestAnimationFrame(playLoop);
+}
+
+// =============================================================================
+//   SELECTION + DETAILS PANEL
+// =============================================================================
+function hitTest(canvasX, canvasY) {
+  const f = state.frames[state.current];
+  if (!f) return null;
+  // Convert from displayed canvas size back to image pixel coords.
+  const rect = cv.getBoundingClientRect();
+  // canvasX,Y are already in CSS pixel coords relative to canvas
+  const ix = canvasX * (cv.width / rect.width);
+  const iy = canvasY * (cv.height / rect.height);
+  // Iterate top-most last (so check in reverse for top picking)
+  const dets = f.detections || [];
+  for (let i = dets.length - 1; i >= 0; i--) {
+    const d = dets[i];
+    if (!passesFilter(d)) continue;
+    if (d.mask_poly && d.mask_poly.length >= 3) {
+      if (pointInPoly(ix, iy, d.mask_poly)) return i;
+    } else if (d.bbox) {
+      if (pointInBbox(ix, iy, d.bbox)) return i;
+    }
+  }
+  return null;
+}
+
+function renderDetails() {
+  const out = $("details");
+  const f = state.frames[state.current];
+  if (!f || state.selectedBollIdx == null) {
+    out.innerHTML = `<div class="details-empty">Click any boll on the canvas to see its full per-detection record here.</div>`;
+    return;
+  }
+  const d = f.detections[state.selectedBollIdx];
+  if (!d) {
+    out.innerHTML = `<div class="details-empty">Selection not found.</div>`;
+    return;
+  }
+  const cls = d.occ_class ?? "no_aux";
+  const color = colorFor(d);
+  const tip = (d.kpts && d.kpts[0]) || [null,null,0];
+  const base = (d.kpts && d.kpts[1]) || [null,null,0];
+  const tipConf = tip[2] ?? 0;
+  const baseConf = base[2] ?? 0;
+  const visfrac = d.visfrac;
+  const visBar = visfrac == null ? "" :
+    `<div class="bar"><div class="fill" style="width:${(visfrac*100).toFixed(0)}%; background:${color}"></div></div>`;
+  const confBar = d.det_conf == null ? "" :
+    `<div class="bar"><div class="fill" style="width:${(d.det_conf*100).toFixed(0)}%"></div></div>`;
+  const tipBar = `<div class="bar"><div class="fill" style="width:${(tipConf*100).toFixed(0)}%; background:${COLOR_TIP}"></div></div>`;
+  const baseBar = `<div class="bar"><div class="fill" style="width:${(baseConf*100).toFixed(0)}%; background:${COLOR_BASE}"></div></div>`;
+  const kThresh = state.filters.kptConfMin;
+  const tipLabel = tipConf >= kThresh ? "committed" : (tipConf > 0 ? "low conf (guessed)" : "not predicted");
+  const baseLabel = baseConf >= kThresh ? "committed" : (baseConf > 0 ? "low conf (guessed)" : "not predicted");
+  // Pixel-space measurements — always available (no depth, no intrinsics).
+  const pxKpt = tipBasePx(d);
+  const pxMask = maskAxisPx(d);
+  const pxArea = maskAreaPx(d);
+  const pxRatio = (pxKpt != null && pxMask) ? pxKpt / pxMask.lengthPx : null;
+  const pixelRows = `
+    <div class="detail-row"><span class="k">tip–base (px)</span><span class="v"><b>${pxKpt != null ? pxKpt.toFixed(1) : "—"}</b></span></div>
+    <div class="detail-row"><span class="k">mask axis len (px)</span><span class="v">${pxMask ? pxMask.lengthPx.toFixed(1) : "—"}</span></div>
+    <div class="detail-row"><span class="k">mask width (px)</span><span class="v">${pxMask ? pxMask.widthPx.toFixed(1) : "—"}</span></div>
+    <div class="detail-row"><span class="k">kpt / mask len</span><span class="v">${pxRatio != null ? pxRatio.toFixed(2) + (pxRatio < 0.7 || pxRatio > 1.3 ? " ⚠" : "") : "—"}</span></div>
+    <div class="detail-row"><span class="k">mask area (px²)</span><span class="v">${pxArea != null ? Math.round(pxArea).toLocaleString() : "—"}</span></div>
+    <div style="font-size:10px; color:var(--text-faint); padding:3px 0; line-height:1.4">
+      Pixel sizes are not physical sizes — a boll twice as far reads half as many px.
+      Comparable only at equal distance. Physical size = px × Z / f.</div>
+  `;
+  // Depth rows (only when depth maps are loaded)
+  let depthRows = "";
+  if (state.depth.filesByStem.has(f.stem)) {
+    const dd = state.depth.cache.get(f.stem);
+    if (!dd) {
+      depthRows = `<div class="detail-row"><span class="k">depth</span><span class="v">loading…</span></div>`;
+    } else {
+      const ds = bollDepthStats(d, dd);
+      const zRef = ds ? ds.zMedM : null;
+      const zt = sampleDepthNearRef(dd, tip[0], tip[1], zRef);
+      const zb = sampleDepthNearRef(dd, base[0], base[1], zRef);
+      const h3 = bollHeight3D(d, dd);
+      const sm = h3 ? (smoothedMeasure(trackKeyOf(d, state.selectedBollIdx), state.current) ?? h3.mm) : null;
+      // Size proxy: px * Z = true_length * f. Proportional to real size with no
+      // intrinsics and no metric depth needed — a consistent scale error in Z
+      // only changes the constant. Comparable across bolls at any distance;
+      // multiply by 1/f, or fit against a few measured bolls, to get real units.
+      const proxyAxis = (ds && pxMask) ? pxMask.lengthPx * ds.zMedM : null;
+      const proxyKpt = (ds && pxKpt != null) ? pxKpt * ds.zMedM : null;
+      depthRows = `
+        <div class="detail-row"><span class="k">camera → boll</span><span class="v"><b>${ds ? (ds.zMedM * 1000).toFixed(1) + " " + U() : "—"}</b></span></div>
+        <div class="detail-row"><span class="k">boll depth IQR</span><span class="v">${ds ? ((ds.q75 - ds.q25) * 1000).toFixed(1) + " " + U() : "—"}</span></div>
+        <div class="detail-row"><span class="k">tip depth (constr.)</span><span class="v">${zt ? (zt.m * 1000).toFixed(1) + " " + U() + (zt.est ? " ≈" : "") : "—"}</span></div>
+        <div class="detail-row"><span class="k">base depth (constr.)</span><span class="v">${zb ? (zb.m * 1000).toFixed(1) + " " + U() + (zb.est ? " ≈" : "") : "—"}</span></div>
+        <div class="detail-row"><span class="k">dz (tip − base)</span><span class="v">${(zt && zb) ? ((zt.m - zb.m) * 1000).toFixed(1) + " " + U() + ((zt.est || zb.est) ? " ≈" : "") : "—"}</span></div>
+        <div class="detail-row" style="border-top:1px solid var(--b); margin-top:3px; padding-top:5px"><span class="k">size proxy (axis)</span><span class="v"><b>${proxyAxis != null ? proxyAxis.toFixed(1) : "—"}</b></span></div>
+        <div class="detail-row"><span class="k">size proxy (kpt)</span><span class="v">${proxyKpt != null ? proxyKpt.toFixed(1) : "—"}</span></div>
+        <div class="detail-row" style="border-top:1px solid var(--b); margin-top:3px; padding-top:5px"><span class="k">tip–base (keypoints)</span><span class="v">${h3 ? h3.mmKpt.toFixed(1) + " " + U() + (h3.ok ? "" : " ⚠") : "—"}</span></div>
+        <div class="detail-row"><span class="k">mask axis extent</span><span class="v">${h3 && h3.maskMm != null ? h3.maskMm.toFixed(1) + " " + U() : "—"}</span></div>
+        <div class="detail-row"><span class="k">used this frame</span><span class="v">${h3 ? h3.mm.toFixed(1) + " " + U() + (h3.est ? " ≈" : "") : "—"}</span></div>
+        <div class="detail-row"><span class="k">tip–base 5-frame med</span><span class="v"><b>${sm != null ? sm.toFixed(1) + " " + U() : "—"}</b></span></div>
+        <div style="font-size:10px; color:var(--text-faint); padding:3px 0; line-height:1.4">
+          ${state.depth.calibrated ? `<b>mm — calibrated.</b> Depth maps declare metric
+          units and the intrinsics are loaded, so these are real millimetres.
+          The scale constant is per-scene: it holds for this capture, not for a
+          different scene or lens setting. Prefer the multi-frame median over any
+          single frame.` : `<b>u = arbitrary units</b>, not mm. Depths come from a monocular
+          network whose absolute scale is uncalibrated, and the focal length is
+          estimated. All values above share one unknown constant, so ratios and
+          comparisons are meaningful; absolute magnitudes are not. Fit that
+          constant against physically measured bolls to convert to mm.`}</div>
+      `;
+    }
+  }
+  const trackChip = d.track_id != null
+    ? `<span style="float:right; padding:2px 8px; background:#0c121b; border:1px solid ${color}; color:${color}; border-radius:99px; font-size:11px; font-family:ui-monospace, 'SF Mono', monospace;">track #${d.track_id}</span>`
+    : "";
+  out.innerHTML = `
+    <div class="detail-class" style="color:${color}">
+      <span style="display:inline-block; width:10px; height:10px; background:${color}; border-radius:2px; margin-right:6px;"></span>
+      ${cls}  (boll #${state.selectedBollIdx})
+      ${trackChip}
+    </div>
+    <div class="detail-row"><span class="k">occ class</span><span class="v">${d.occ_class ?? "—"}</span></div>
+    <div class="detail-row"><span class="k">occ conf</span><span class="v">${d.occ_class_conf != null ? d.occ_class_conf.toFixed(3) : "—"}</span></div>
+    <div class="detail-row"><span class="k">visfrac</span><span class="v">${visfrac != null ? visfrac.toFixed(3) : "—"}</span></div>
+    ${visBar}
+    <div class="detail-row"><span class="k">det conf</span><span class="v">${d.det_conf != null ? d.det_conf.toFixed(3) : "—"}</span></div>
+    ${confBar}
+    <div class="detail-row"><span class="k">bbox x,y</span><span class="v">${fmt(d.bbox?.[0])}, ${fmt(d.bbox?.[1])}</span></div>
+    <div class="detail-row"><span class="k">bbox w,h</span><span class="v">${fmt(d.bbox?.[2])}, ${fmt(d.bbox?.[3])}</span></div>
+    <div class="detail-row"><span class="k">tip xy</span><span class="v">${fmt(tip[0])}, ${fmt(tip[1])}</span></div>
+    <div class="detail-row"><span class="k">tip conf</span><span class="v">${tipConf.toFixed(3)} (${tipLabel})</span></div>
+    ${tipBar}
+    <div class="detail-row"><span class="k">base xy</span><span class="v">${fmt(base[0])}, ${fmt(base[1])}</span></div>
+    <div class="detail-row"><span class="k">base conf</span><span class="v">${baseConf.toFixed(3)} (${baseLabel})</span></div>
+    ${baseBar}
+    <div class="detail-row"><span class="k">poly verts</span><span class="v">${d.mask_poly?.length ?? 0}</span></div>
+    ${pixelRows}
+    ${depthRows}
+  `;
+}
+
+function renderFrameStats() {
+  const f = state.frames[state.current];
+  const out = $("frame-stats");
+  if (!f) { out.textContent = "No frame loaded."; return; }
+  const all = f.detections || [];
+  const visible = all.filter(passesFilter);
+  const byCls = {};
+  for (const d of visible) {
+    const c = d.occ_class ?? "_noaux";
+    byCls[c] = (byCls[c] || 0) + 1;
+  }
+  let html = `<div class="detail-row"><span class="k">total bolls</span><span class="v">${all.length}</span></div>`;
+  html += `<div class="detail-row"><span class="k">passing filter</span><span class="v">${visible.length}</span></div>`;
+  for (const c of ["none","leaf","stem","other_boll","other","frame_edge","_noaux"]) {
+    if (!byCls[c]) continue;
+    html += `<div class="detail-row"><span class="k">
+      <span style="display:inline-block; width:8px; height:8px; background:${COLOR_BY_CLASS[c]}; border-radius:2px; margin-right:5px;"></span>
+      ${c}</span><span class="v">${byCls[c]}</span></div>`;
+  }
+  if (f.width) {
+    html += `<div class="detail-row"><span class="k">image px</span><span class="v">${f.width}×${f.height}</span></div>`;
+  }
+  const dd = state.depth.cache.get(f.stem);
+  if (dd) {
+    html += `<div class="detail-row"><span class="k">depth valid px</span><span class="v">${(dd.validFrac * 100).toFixed(1)}%</span></div>`;
+    html += `<div class="detail-row"><span class="k">depth 2–98%</span><span class="v">${depthValToM(dd, dd.autoMinRaw).toFixed(2)}–${depthValToM(dd, dd.autoMaxRaw).toFixed(2)} m</span></div>`;
+  }
+  out.innerHTML = html;
+}
+
+function fmt(v) {
+  if (v == null) return "—";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  return String(v);
+}
+
+// =============================================================================
+//   BOLL SIZE REPORT
+//   Scans every frame, measures each tracked boll, merges track fragments that
+//   belong to the same physical boll, rejects Tukey-fence outliers, and reports
+//   one robust number per boll. Results are cached (memory + localStorage) so
+//   reopening the report does not rescan; use "Rescan" to force recompute.
+// =============================================================================
+let lastReport = null;        // { rows, sig, when }
+let reportRunning = false;
+
+// The cache key must describe the DETECTIONS too, not just the frames: the same
+// frame folder gets re-scanned with different tracking runs, and those produce
+// different track ids. Keying on frames alone served one run's rows for another.
+function reportSignature() {
+  const f0 = state.frames[0], f1 = state.frames[state.frames.length - 1];
+  let nDet = 0, nWithDets = 0, idMax = -1, idSum = 0;
+  for (const f of state.frames) {
+    const ds = f.detections;
+    if (!ds || !ds.length) continue;
+    nWithDets++; nDet += ds.length;
+    for (const d of ds) {
+      if (d.track_id == null) continue;
+      idSum += d.track_id;
+      if (d.track_id > idMax) idMax = d.track_id;
+    }
+  }
+  const intr = state.depth.meta?.intrinsics;
+  return state.frames.length + ":" + (f0 ? f0.stem : "") + ":" + (f1 ? f1.stem : "")
+       + ":d" + nWithDets + "/" + nDet + "/" + idMax + "/" + idSum
+       + ":z" + state.depth.filesByStem.size + "/" + (intr ? intr.fx.toFixed(2) : "-")
+       + ":k" + state.filters.kptConfMin.toFixed(2);
+}
+
+// Quartiles by linear interpolation + Tukey-fence outlier rejection.
+function robustStats(vals) {
+  if (!vals.length) return null;
+  const v = [...vals].sort((a, b) => a - b);
+  const q = (p) => {
+    const t = p * (v.length - 1), l = Math.floor(t);
+    return v[l] + (v[Math.min(l + 1, v.length - 1)] - v[l]) * (t - l);
+  };
+  const q1 = q(0.25), q3 = q(0.75), iqr = q3 - q1;
+  const loF = q1 - 1.5 * iqr, hiF = q3 + 1.5 * iqr;
+  const inl = v.filter(x => x >= loF && x <= hiF);
+  if (!inl.length) return null;
+  const mean = inl.reduce((a, b) => a + b, 0) / inl.length;
+  const sd = Math.sqrt(inl.reduce((a, x) => a + (x - mean) * (x - mean), 0) / inl.length);
+  return { n: vals.length, nIn: inl.length, median: medianOf(inl), mean, sd, min: inl[0], max: inl[inl.length - 1] };
+}
+
+// ---- track-fragment merging --------------------------------------------------
+// The tracker never reuses ids: a boll that is occluded / leaves frame and is
+// re-acquired comes back under a NEW id. Merge fragments that are plausibly the
+// same physical boll: non-overlapping in time with a small frame gap, the new
+// fragment starts near where the old one ended, and camera distance matches.
+const MERGE_MAX_GAP = 90;      // max frame gap between fragments
+const MERGE_BASE_PX = 35;      // position tolerance at zero gap, px
+const MERGE_DRIFT_PX = 0.5;    // extra tolerance per frame of gap, px
+const MERGE_MAX_DZ  = 0.20;    // max camera-distance difference, m
+
+// Where a fragment was heading, from its last <=10 measured centroids. The
+// camera pans, so "the fragment re-appeared near where the old one stopped" is
+// not evidence of the same boll -- over a 69-frame gap the camera has moved
+// ~200px and a DIFFERENT boll has drifted into that spot. Only a fragment that
+// turns up where the old one's own motion predicts is the same boll.
+function fragVelocity(pts) {
+  const p = pts.slice(-10);
+  if (p.length < 2) return null;
+  const dt = p[p.length - 1][0] - p[0][0];
+  if (dt <= 0) return null;
+  return [(p[p.length - 1][1][0] - p[0][1][0]) / dt,
+          (p[p.length - 1][1][1] - p[0][1][1]) / dt];
+}
+
+function mergeTrackFragments(perTrack) {
+  const frags = [...perTrack.entries()].map(([id, t]) => ({
+    ids: [id],
+    first: t.first, last: t.last,
+    firstC: t.firstC, lastC: t.lastC, pts: [...t.pts],
+    zMed: t.dists.length ? medianOf([...t.dists].sort((a, b) => a - b)) : null,
+    mms: [...t.mms], dists: [...t.dists], okCount: t.okCount,
+  })).sort((a, b) => a.first - b.first);
+
+  const merged = [];
+  for (const fr of frags) {
+    let best = null, bestD = Infinity;
+    for (const m of merged) {
+      const gap = fr.first - m.last;
+      if (gap < 0 || gap > MERGE_MAX_GAP) continue;
+      if (!m.lastC || !fr.firstC) continue;
+      if (m.zMed != null && fr.zMed != null && Math.abs(m.zMed - fr.zMed) > MERGE_MAX_DZ) continue;
+      // Predict the old fragment forward across the gap; a fragment too short to
+      // give a velocity is predicted as stationary, which merges only the obvious.
+      const v = fragVelocity(m.pts) || [0, 0];
+      const err = Math.hypot(m.lastC[0] + v[0] * gap - fr.firstC[0],
+                             m.lastC[1] + v[1] * gap - fr.firstC[1]);
+      if (err > MERGE_BASE_PX + MERGE_DRIFT_PX * gap) continue;
+      if (err < bestD) { bestD = err; best = m; }
+    }
+    if (best) {
+      best.ids.push(...fr.ids);
+      best.last = fr.last;
+      best.lastC = fr.lastC;
+      best.pts.push(...fr.pts);
+      best.mms.push(...fr.mms);
+      best.dists.push(...fr.dists);
+      best.okCount += fr.okCount;
+      if (best.dists.length) best.zMed = medianOf([...best.dists].sort((a, b) => a - b));
+    } else {
+      merged.push(fr);
+    }
+  }
+  return merged;
+}
+
+async function computeBollReport(force = false) {
+  if (reportRunning) return;
+  if (!state.frames.length) { showToast("Load frames + detections first.", "err"); return; }
+  const sig = reportSignature();
+  if (!force) {
+    if (lastReport && lastReport.sig === sig) { renderReportRows(lastReport); return; }
+    try {
+      const cached = JSON.parse(localStorage.getItem("bollReport") || "null");
+      if (cached && cached.sig === sig && cached.rows) { lastReport = cached; renderReportRows(cached); return; }
+    } catch (e) { /* localStorage unavailable — fall through to scan */ }
+  }
+  if (!state.depth.filesByStem.size || !state.depth.meta?.intrinsics) {
+    showToast("Depth maps + metadata.json (intrinsics) are required for the report.", "err"); return;
+  }
+  reportRunning = true;
+  const btn = $("report-btn");
+  btn.disabled = true;
+  const perTrack = new Map();   // track_id -> { mms, dists, okCount, first, last, firstC, lastC }
+  const N = state.frames.length;
+  try {
+    for (let i = 0; i < N; i++) {
+      const f = state.frames[i];
+      if (!f.detections || !f.detections.length || !state.depth.filesByStem.has(f.stem)) continue;
+      const dd = await getDepth(f);
+      if (!dd) continue;
+      for (const d of f.detections) {
+        if (d.track_id == null) continue;
+        const h3 = bollHeight3D(d, dd);
+        if (!h3) continue;
+        const c = centroidOf(d);
+        let t = perTrack.get(d.track_id);
+        if (!t) {
+          t = { mms: [], dists: [], okCount: 0, first: i, last: i, firstC: c, lastC: c, pts: [] };
+          perTrack.set(d.track_id, t);
+        }
+        t.mms.push(h3.mm);
+        if (h3.ok) t.okCount++;
+        if (h3.zBollM != null) t.dists.push(h3.zBollM);
+        t.last = i;
+        t.lastC = c || t.lastC;
+        if (c) t.pts.push([i, c]);
+      }
+      if (i % 10 === 0) {
+        setLoading(i / N);
+        btn.textContent = `Scanning… ${Math.round(i / N * 100)}%`;
+        await new Promise(r => setTimeout(r, 0));   // keep the UI responsive
+      }
+    }
+  } finally {
+    setLoading(null);
+    btn.disabled = false;
+    btn.textContent = "Boll report";
+    reportRunning = false;
+  }
+  if (!perTrack.size) { showToast("No tracked bolls with measurable size found.", "err"); return; }
+
+  const merged = mergeTrackFragments(perTrack)
+    .sort((a, b) => Math.min(...a.ids) - Math.min(...b.ids));
+  const rows = [];
+  for (const m of merged) {
+    const st = robustStats(m.mms);
+    if (!st) continue;
+    const dst = robustStats(m.dists);
+    rows.push({
+      ids: [...m.ids].sort((a, b) => a - b),
+      frames: m.mms.length, firstFrame: m.first, lastFrame: m.last, qcPass: m.okCount,
+      used: st.nIn, medianCm: st.median, meanCm: st.mean, sdCm: st.sd,
+      minCm: st.min, maxCm: st.max, distM: dst ? dst.median * 1000 : null,
+    });
+  }
+  lastReport = { rows, sig, when: new Date().toISOString() };
+  try { localStorage.setItem("bollReport", JSON.stringify(lastReport)); } catch (e) { /* ignore */ }
+  renderReportRows(lastReport);
+}
+
+function renderReportRows(rep) {
+  const rows = rep.rows;
+  const fm = (v, dec = 2) => v == null ? "—" : v.toFixed(dec);
+  const nMerged = rows.filter(r => r.ids.length > 1).length;
+  const when = rep.when ? new Date(rep.when).toLocaleString() : "";
+  $("report-sub").textContent =
+    `${rows.length} boll(s) (${nMerged} merged from fragments) · scanned ${when}`;
+  $("report-body").innerHTML = `
+    <p class="report-note">
+      Per boll: every frame's tip–base 3-D length is measured with mask-constrained depth and
+      keypoint/mask fusion, track fragments belonging to the same physical boll are merged
+      (re-appears within ${MERGE_MAX_GAP} frames, within ${MERGE_BASE_PX}+${MERGE_DRIFT_PX}·gap px of where
+      the fragment's own motion predicts, similar camera distance),
+      then Tukey-fence outliers (outside Q1−1.5·IQR … Q3+1.5·IQR) are removed.
+      <b>Median</b> is the recommended reported size.
+    </p>
+    <table>
+      <tr><th>boll (track ids)</th><th>frames</th><th>span</th><th>QC pass</th><th>used*</th>
+          <th>median ${U()}</th><th>mean ± sd ${U()}</th><th>range ${U()}</th><th>cam dist ${U()}</th></tr>
+      ${rows.map(r => `<tr>
+        <td>#${r.ids.join(" + #")}</td><td>${r.frames}</td><td>${r.firstFrame}–${r.lastFrame}</td>
+        <td>${r.qcPass}</td><td>${r.used}</td>
+        <td><b>${fm(r.medianCm)}</b></td><td>${fm(r.meanCm)} ± ${fm(r.sdCm)}</td>
+        <td>${fm(r.minCm, 1)}–${fm(r.maxCm, 1)}</td><td>${fm(r.distM)}</td>
+      </tr>`).join("")}
+    </table>
+    <p class="report-note" style="margin-top:10px">
+      *used = samples remaining after outlier removal · cam dist = median camera→boll distance.
+      Report is cached — press <b>Rescan</b> after changing the kpt threshold or reloading different data.
+      Treat rows with few frames cautiously.</p>`;
+  $("report-modal").classList.add("open");
+}
+
+function exportReportCSV() {
+  if (!lastReport || !lastReport.rows || !lastReport.rows.length) { showToast("Run the report first.", "err"); return; }
+  const u = U();   // "mm" once metadata.json declares metric depth, else "u"
+  const head = "track_ids,frames,first_frame,last_frame,qc_pass,used_after_outlier_removal,"
+             + `median_${u},mean_${u},sd_${u},min_${u},max_${u},camera_dist_${u}`;
+  const lines = lastReport.rows.map(r => [
+    '"' + r.ids.join("+") + '"', r.frames, r.firstFrame, r.lastFrame, r.qcPass, r.used,
+    r.medianCm.toFixed(3), r.meanCm.toFixed(3), r.sdCm.toFixed(3),
+    r.minCm.toFixed(3), r.maxCm.toFixed(3), r.distM != null ? r.distM.toFixed(3) : "",
+  ].join(","));
+  const blob = new Blob([head + "\n" + lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `boll_size_report_${u}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// =============================================================================
+//   LIVE MEASUREMENT PLOT PANEL (docked above the frame canvas)
+//   Click a boll -> the panel plots its tip–base 3-D distance (mm) per frame,
+//   accumulating live as frames are visited. Supports a constant ground-truth
+//   line + min / max / avg / stdev readout.
+// =============================================================================
+function showPlotPanel() {
+  const p = state.plot;
+  if (!p.visible) {
+    p.visible = true;
+    document.getElementById("plot-panel").classList.add("open");
+    render();   // refit the frame canvas below the panel (also redraws the plot)
+  }
+}
+
+function hidePlotPanel() {
+  state.plot.visible = false;
+  document.getElementById("plot-panel").classList.remove("open");
+  if (state.frames.length) render();
+}
+
+// Find the plotted boll in a frame: by track_id when available, else by index.
+function findPlotTargetDet(f) {
+  const t = state.plot.target;
+  if (!t || !f) return null;
+  const dets = f.detections || [];
+  if (t.type === "track") {
+    for (const d of dets) if (d.track_id === t.id) return d;
+    return null;
+  }
+  return dets[t.idx] || null;
+}
+
+function setPlotTarget(d, idx) {
+  const p = state.plot;
+  const target = (d.track_id != null)
+    ? { type: "track", id: d.track_id }
+    : { type: "index", idx };
+  const same = p.target && p.target.type === target.type &&
+    (target.type === "track" ? p.target.id === target.id : p.target.idx === target.idx);
+  if (!same) p.points.clear();          // new boll -> new series
+  p.target = target;
+  p.label = target.type === "track"
+    ? `track #${target.id}`
+    : `boll #${idx} (no track id — matched by index)`;
+  showPlotPanel();
+  // Depth may not be cached yet (e.g. overlay + height labels both off).
+  const f = state.frames[state.current];
+  if (f && depthWanted(f.stem) && !state.depth.cache.has(f.stem)) {
+    getDepth(f).then(() => updatePlotForCurrentFrame());
+  }
+  updatePlotForCurrentFrame();
+}
+
+function updatePlotForCurrentFrame() {
+  const p = state.plot;
+  if (!p.target || !p.visible) return;
+  const f = state.frames[state.current];
+  if (!f) return;
+  const d = findPlotTargetDet(f);
+  if (d) {
+    const dd = state.depth.cache.get(f.stem);
+    const h3 = dd ? bollHeight3D(d, dd) : null;
+    if (h3) {
+      p.points.set(state.current, h3.mm);
+      p.dist = h3.zBollM;   // camera -> boll distance for the stats bar
+    }
+  }
+  redrawPlot();
+}
+
+function redrawPlot() {
+  const p = state.plot;
+  if (!p.visible) return;
+  const cvp = $("plot-cv");
+  if (!cvp || !cvp.parentElement) return;
+
+  const wrap = cvp.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(80, wrap.clientWidth);
+  const H = Math.max(80, wrap.clientHeight);
+  if (cvp.width !== Math.round(W * dpr) || cvp.height !== Math.round(H * dpr)) {
+    cvp.width = Math.round(W * dpr);
+    cvp.height = Math.round(H * dpr);
+  }
+  cvp.style.width = W + "px";
+  cvp.style.height = H + "px";
+  const g = cvp.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+
+  $("plot-title").textContent =
+    `Boll measurement (${state.depth.calibrated ? "mm, calibrated" : "arbitrary units"}) — ` + (p.label || "click a boll in the viewer");
+
+  const entries = [...p.points.entries()].sort((a, b) => a[0] - b[0]);
+  const vals = entries.map(e => e[1]);
+  const n = vals.length;
+
+  // Rolling-median smoothed series (same SMOOTH_WIN window, by frame index).
+  const smEntries = entries.map(([fr], i) => {
+    const win = [];
+    for (let j = i; j >= 0 && fr - entries[j][0] < SMOOTH_WIN; j--) win.push(entries[j][1]);
+    win.sort((a, b) => a - b);
+    return [fr, medianOf(win)];
+  });
+  const smVals = smEntries.map(e => e[1]);
+  const smAt = new Map(smEntries);
+  const cur = smAt.get(state.current) ?? p.points.get(state.current);
+
+  // Tukey fences on the raw samples -> outliers are drawn red + counted.
+  let loF = -Infinity, hiF = Infinity, nOut = 0;
+  if (n >= 8) {
+    const sv = [...vals].sort((a, b) => a - b);
+    const qv = (pp) => { const t = pp * (sv.length - 1); const l = Math.floor(t); return sv[l] + (sv[Math.min(l + 1, sv.length - 1)] - sv[l]) * (t - l); };
+    const iqr = qv(0.75) - qv(0.25);
+    loF = qv(0.25) - 1.5 * iqr; hiF = qv(0.75) + 1.5 * iqr;
+    for (const v of vals) if (v < loF || v > hiF) nOut++;
+  }
+
+  // ---- stats (on the smoothed series)
+  let mn = null, mx = null, mean = null, sd = null;
+  if (n) {
+    mn = smVals[0]; mx = smVals[0]; let s = 0;
+    for (const v of smVals) { if (v < mn) mn = v; if (v > mx) mx = v; s += v; }
+    mean = s / n;
+    let ss = 0;
+    for (const v of smVals) ss += (v - mean) * (v - mean);
+    sd = Math.sqrt(ss / n);
+  }
+  const f1 = v => v == null ? "—" : v.toFixed(1);
+  const chips = [
+    ["current", f1(cur)], ["min", f1(mn)], ["max", f1(mx)],
+    ["avg", f1(mean)], ["stdev", sd == null ? "—" : sd.toFixed(2)], ["frames", String(n)],
+    ["outliers", String(nOut)],
+    ["cam dist", p.dist != null ? (p.dist * 1000).toFixed(0) + " " + U() : "—"],
+  ];
+  if (p.gt != null) {
+    chips.push(["GT", f1(p.gt)]);
+    chips.push(["avg − GT", mean == null ? "—" : (mean - p.gt).toFixed(1)]);
+  }
+  $("plot-stats").innerHTML =
+    chips.map(([k, v]) => `<span class="chip">${k}<b>${v}</b></span>`).join("");
+
+  // ---- plot geometry
+  const mL = 54, mR = 16, mT = 14, mB = 30;
+  const pw = W - mL - mR, ph = H - mT - mB;
+  if (pw < 20 || ph < 20) return;
+
+  let x0, x1;
+  if (n) { x0 = entries[0][0]; x1 = entries[n - 1][0]; }
+  else   { x0 = 0; x1 = Math.max(1, state.frames.length - 1); }
+  if (x1 === x0) { x0 -= 1; x1 += 1; }
+
+  let lo = Infinity, hi = -Infinity;
+  for (const v of vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (p.gt != null) { if (p.gt < lo) lo = p.gt; if (p.gt > hi) hi = p.gt; }
+  if (!isFinite(lo)) { lo = 0; hi = 100; }
+  if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+  const yPad = (hi - lo) * 0.12;
+  lo = Math.max(0, lo - yPad); hi += yPad;
+
+  const X = fr => mL + (fr - x0) / (x1 - x0) * pw;
+  const Y = v  => mT + (1 - (v - lo) / (hi - lo)) * ph;
+
+  // ---- grid + axes
+  g.font = '11px ui-monospace,"SF Mono",monospace';
+  g.strokeStyle = "#232c3d"; g.fillStyle = "#6b7689"; g.lineWidth = 1;
+  g.textAlign = "right"; g.textBaseline = "middle";
+  const nT = 5;
+  for (let i = 0; i <= nT; i++) {
+    const v = lo + (hi - lo) * i / nT, y = Y(v);
+    g.beginPath(); g.moveTo(mL, y); g.lineTo(W - mR, y); g.stroke();
+    g.fillText(v.toFixed(1), mL - 6, y);
+  }
+  g.textAlign = "left"; g.textBaseline = "bottom";
+  g.fillText("mm", 8, mT + 4);
+  g.textAlign = "center"; g.textBaseline = "top";
+  const nX = Math.min(10, Math.max(2, Math.floor(pw / 80)));
+  for (let i = 0; i <= nX; i++) {
+    const fr = Math.round(x0 + (x1 - x0) * i / nX);
+    g.fillText(String(fr), X(fr), H - mB + 8);
+  }
+  // ---- reference lines
+  const dashLine = (y, color, label) => {
+    g.save();
+    g.setLineDash([6, 4]); g.strokeStyle = color; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(mL, y); g.lineTo(W - mR, y); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = color; g.textAlign = "left"; g.textBaseline = "bottom";
+    g.font = '600 11px ui-monospace,"SF Mono",monospace';
+    g.fillText(label, mL + 4, y - 2);
+    g.restore();
+  };
+  if (mean != null) dashLine(Y(mean), "#9aa6bb", "avg " + mean.toFixed(1));
+  if (p.gt != null) dashLine(Y(p.gt), "#3ddc97", "GT " + p.gt.toFixed(1));
+
+  // ---- data series: raw samples (faint dots) + rolling-median line (bold)
+  if (n) {
+    g.save();
+    for (const [fr, v] of entries) {
+      const isOut = v < loF || v > hiF;
+      g.globalAlpha = isOut ? 0.85 : 0.35;
+      g.fillStyle = isOut ? "#ff5c6c" : "#4ea1ff";
+      g.beginPath(); g.arc(X(fr), Y(v), isOut ? 2.6 : 2, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+    g.strokeStyle = "#4ea1ff"; g.lineWidth = 2;
+    g.beginPath();
+    smEntries.forEach(([fr, v], i) => {
+      const x = X(fr), y = Y(v);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    if (cur != null) {   // highlight the current frame's smoothed value
+      g.fillStyle = "#6cc1ff"; g.strokeStyle = "#0c0f14"; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(X(state.current), Y(cur), 5, 0, Math.PI * 2);
+      g.fill(); g.stroke();
+    }
+    // mini legend
+    g.fillStyle = "#6b7689"; g.textAlign = "right"; g.textBaseline = "top";
+    g.font = '10px ui-monospace,"SF Mono",monospace';
+    g.fillText("dots = raw (red = outlier) · line = " + SMOOTH_WIN + "-frame median", W - mR, 2);
+  } else {
+    g.fillStyle = "#6b7689"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.font = '12px -apple-system,"Segoe UI",sans-serif';
+    g.fillText("No samples yet — play or scrub frames in the viewer.", mL + pw / 2, mT + ph / 2 - 10);
+    g.fillText("(needs tip + base ≥ kpt threshold, valid depth, and metadata.json intrinsics)", mL + pw / 2, mT + ph / 2 + 10);
+  }
+}
+
+// =============================================================================
+//   EVENT WIRING
+// =============================================================================
+function init() {
+  // Load buttons
+  $("load-frames-btn").onclick = () => pickFolder("frames");
+  $("load-dets-btn").onclick   = () => pickFolder("dets");
+  $("load-depth-btn").onclick  = () => pickFolder("depth");
+  $("load-frames-btn-2").onclick = () => pickFolder("frames");
+  $("load-dets-btn-2").onclick   = () => pickFolder("dets");
+
+  // Help
+  $("help-btn").onclick = () => {
+    showToast(
+      `Shortcuts:  Space=play/pause   ←/→=step   J/K=jump 10   Home/End=first/last   F=fit   D=depth   M=depth mode   +/-=speed`,
+      "ok", 4500
+    );
+  };
+
+  // Layer toggles
+  const wire = (id, prop) => {
+    const el = $(id);
+    el.addEventListener("change", () => { state.layers[prop] = el.checked; render(); });
+  };
+  wire("t-bbox","bbox"); wire("t-mask-fill","maskFill"); wire("t-mask-outline","maskOutline");
+  wire("t-kpt-tip","tip"); wire("t-kpt-base","base"); wire("t-axis","axis");
+  wire("t-label","label"); wire("t-lbl-cls","lblCls"); wire("t-lbl-v","lblV"); wire("t-lbl-d","lblD");
+  wire("t-track-id","trackId"); wire("t-trails","trails");
+
+  $("kpt-conf-min").addEventListener("input", (e) => {
+    state.filters.kptConfMin = parseFloat(e.target.value);
+    $("kpt-conf-min-v").textContent = state.filters.kptConfMin.toFixed(2);
+    render(); renderDetails();
+  });
+  $("trail-len").addEventListener("input", (e) => {
+    state.view.trailLen = parseInt(e.target.value, 10);
+    $("trail-len-v").textContent = String(state.view.trailLen);
+    render();
+  });
+
+  $("mask-alpha").addEventListener("input", (e) => {
+    state.view.maskAlpha = parseFloat(e.target.value);
+    $("mask-alpha-v").textContent = state.view.maskAlpha.toFixed(2);
+    render();
+  });
+
+  // Depth controls
+  const setDepthEnabled = async (on) => {
+    state.depth.enabled = on;
+    $("t-depth").checked = on;
+    // Load the current frame's depth before repainting so toggling doesn't flash.
+    const f = state.frames[state.current];
+    if (on && f && depthWanted(f.stem)) await getDepth(f);
+    render(); renderDetails();
+  };
+  const setDepthMode = (m) => {
+    state.depth.mode = m;
+    $("depth-mode-full").classList.toggle("on", m === "full");
+    $("depth-mode-bolls").classList.toggle("on", m === "bolls");
+    render();
+  };
+  $("t-depth").addEventListener("change", (e) => setDepthEnabled(e.target.checked));
+  $("depth-mode-full").onclick  = () => setDepthMode("full");
+  $("depth-mode-bolls").onclick = () => setDepthMode("bolls");
+  $("t-depth-heights").addEventListener("change", (e) => {
+    state.depth.showHeights = e.target.checked;
+    render(); renderDetails();
+  });
+  $("depth-alpha").addEventListener("input", (e) => {
+    state.depth.alpha = parseFloat(e.target.value);
+    $("depth-alpha-v").textContent = state.depth.alpha.toFixed(2);
+    render();
+  });
+  $("depth-range-sel").addEventListener("change", (e) => {
+    state.depth.rangeMode = e.target.value;
+    $("depth-fixed-row").style.display = state.depth.rangeMode === "fixed" ? "flex" : "none";
+    render();
+  });
+  const depthFixedChanged = () => {
+    state.depth.fixedMinM = (parseFloat($("depth-min-cm").value) || 0) / 1000;
+    state.depth.fixedMaxM = (parseFloat($("depth-max-cm").value) || 0) / 1000;
+    render();
+  };
+  $("depth-min-cm").addEventListener("change", depthFixedChanged);
+  $("depth-max-cm").addEventListener("change", depthFixedChanged);
+  $("depth-tol-pct").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    if (isFinite(v) && v > 0) state.depth.tolPct = v;
+    // Rolling medians mix values from before/after the change — start clean.
+    measureHist.clear();
+    render(); renderDetails(); renderFrameStats();
+  });
+  // Build the legend gradient once from the turbo LUT.
+  $("depth-grad").style.background = "linear-gradient(to right," +
+    [0, 36, 73, 109, 146, 182, 219, 255].map(i => `rgb(${TURBO_LUT[i].join(",")})`).join(",") + ")";
+
+  // Depth hover readout (image-pixel depth under cursor)
+  const depthReadout = $("depth-readout");
+  cv.addEventListener("mousemove", (e) => {
+    if (!state.depth.enabled) { depthReadout.style.display = "none"; return; }
+    const f = state.frames[state.current];
+    const dd = f && state.depth.cache.get(f.stem);
+    if (!dd) { depthReadout.style.display = "none"; return; }
+    const rect = cv.getBoundingClientRect();
+    const ix = Math.floor((e.clientX - rect.left) * (cv.width / rect.width));
+    const iy = Math.floor((e.clientY - rect.top) * (cv.height / rect.height));
+    // ix/iy are IMAGE px; map to depth indices before reading the array.
+    const [dxf, dyf] = imgToDepthXY(dd, ix, iy);
+    const dx = Math.floor(dxf), dy = Math.floor(dyf);
+    if (dx < 0 || dy < 0 || dx >= dd.width || dy >= dd.height) { depthReadout.style.display = "none"; return; }
+    const v = dd.data[dy * dd.width + dx];
+    depthReadout.style.display = "block";
+    depthReadout.textContent = v > 0
+      ? `(${ix}, ${iy})  ${depthValToM(dd, v).toFixed(3)} m`
+      : `(${ix}, ${iy})  no depth`;
+  });
+  cv.addEventListener("mouseleave", () => { depthReadout.style.display = "none"; });
+
+  // Filters
+  $("conf-min").addEventListener("input", (e) => {
+    state.filters.confMin = parseFloat(e.target.value);
+    $("conf-min-v").textContent = state.filters.confMin.toFixed(2);
+    render(); renderFrameStats();
+  });
+  $("vis-min").addEventListener("input", (e) => {
+    state.filters.visMin = parseFloat(e.target.value);
+    $("vis-min-v").textContent = state.filters.visMin.toFixed(2);
+    render(); renderFrameStats();
+  });
+  document.querySelectorAll(".class-chip").forEach(chip => {
+    chip.onclick = () => {
+      const cls = chip.dataset.cls;
+      if (state.filters.classes.has(cls)) {
+        state.filters.classes.delete(cls);
+        chip.classList.add("off");
+      } else {
+        state.filters.classes.add(cls);
+        chip.classList.remove("off");
+      }
+      render(); renderFrameStats();
+    };
+  });
+
+  // View options
+  $("t-dim-unsel").addEventListener("change", (e) => { state.view.dimUnselected = e.target.checked; render(); });
+  $("t-fit").addEventListener("change", (e) => {
+    state.view.fitToWindow = e.target.checked;
+    if (state.view.fitToWindow) resetToFit(); else render();
+  });
+  $("snap-btn").onclick = () => {
+    const f = state.frames[state.current];
+    if (!f) return;
+    const a = document.createElement("a");
+    a.download = `${f.stem}_annotated.png`;
+    a.href = cv.toDataURL("image/png");
+    a.click();
+  };
+
+  // Boll size report
+  $("report-btn").onclick = () => computeBollReport();
+  $("report-rescan-btn").onclick = () => computeBollReport(true);
+  $("report-close-btn").onclick = () => $("report-modal").classList.remove("open");
+  $("report-csv-btn").onclick = () => exportReportCSV();
+  $("report-modal").addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
+  });
+
+  // Live plot panel controls
+  $("gt-input").addEventListener("input", () => {
+    const v = parseFloat($("gt-input").value);
+    state.plot.gt = Number.isFinite(v) ? v : null;
+    redrawPlot();
+  });
+  $("plot-clear-btn").onclick = () => { state.plot.points.clear(); redrawPlot(); };
+  $("plot-close-btn").onclick = () => hidePlotPanel();
+  // Redraw the plot (and refit the frame canvas) when the panel is resized.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (state.plot.visible) { redrawPlot(); if (state.frames.length) render(); }
+    }).observe(document.querySelector("#plot-panel .plot-body"));
+  }
+
+  // Footer
+  $("first-btn").onclick = () => goToFrame(0);
+  $("prev-btn").onclick  = () => goToFrame(state.current - 1);
+  $("next-btn").onclick  = () => goToFrame(state.current + 1);
+  $("last-btn").onclick  = () => goToFrame(state.frames.length - 1);
+  $("play-btn").onclick  = togglePlay;
+  $("scrub").addEventListener("input", (e) => { goToFrame(parseInt(e.target.value, 10)); });
+  $("speed-sel").addEventListener("change", (e) => { state.speed = parseFloat(e.target.value); });
+  $("fps-input").addEventListener("change", (e) => {
+    state.baseFps = Math.max(1, parseFloat(e.target.value) || 15);
+  });
+
+  // Canvas mouse interaction:
+  //   - mousedown + mouseup with <5px movement = click  -> select boll
+  //   - mousedown + drag > 5px                          -> pan (exits fit mode)
+  //   - wheel                                           -> zoom anchored at cursor
+  const DRAG_THRESHOLD = 5;
+  let drag = null;
+
+  cv.addEventListener("mousedown", (e) => {
+    if (state.frames.length === 0) return;
+    if (e.button !== 0) return;
+    drag = {
+      startX: e.clientX, startY: e.clientY,
+      panX0: state.view.panX, panY0: state.view.panY,
+      panned: false,
+    };
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.panned && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+      drag.panned = true;
+      state.view.fitToWindow = false;
+      $("t-fit").checked = false;
+      cv.classList.add("panning");
+    }
+    if (drag.panned) {
+      state.view.panX = drag.panX0 + dx;
+      state.view.panY = drag.panY0 + dy;
+      applyTransform();
+    }
+  });
+
+  document.addEventListener("mouseup", (e) => {
+    if (!drag) return;
+    const wasDrag = drag.panned;
+    drag = null;
+    cv.classList.remove("panning");
+    if (!wasDrag && state.frames.length > 0) {
+      const rect = cv.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      if (cx >= 0 && cy >= 0 && cx <= rect.width && cy <= rect.height) {
+        const idx = hitTest(cx, cy);
+        state.selectedBollIdx = idx;
+        if (idx != null) {
+          const f = state.frames[state.current];
+          const d = f && f.detections ? f.detections[idx] : null;
+          if (d) setPlotTarget(d, idx);   // open / retarget the live plot window
+        }
+        render(); renderDetails();
+      }
+    }
+  });
+
+  // Wheel zoom anchored at cursor
+  cv.parentElement.addEventListener("wheel", (e) => {
+    if (state.frames.length === 0) return;
+    e.preventDefault();
+    const wrap = cv.parentElement;
+    const wrapRect = wrap.getBoundingClientRect();
+    const cx = e.clientX - wrapRect.left;
+    const cy = e.clientY - wrapRect.top;
+    const factor = e.deltaY > 0 ? 1 / 1.18 : 1.18;
+    setZoomAtPoint(state.view.zoom * factor, cx, cy);
+  }, { passive: false });
+
+  // Zoom buttons
+  $("zoom-in-btn").onclick  = () => setZoomFromCenter(state.view.zoom * 1.25);
+  $("zoom-out-btn").onclick = () => setZoomFromCenter(state.view.zoom / 1.25);
+  $("zoom-fit-btn").onclick = () => resetToFit();
+  $("zoom-100-btn").onclick = () => setZoomFromCenter(1.0);
+
+  // Keyboard
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    switch (e.key) {
+      case " ": e.preventDefault(); togglePlay(); break;
+      case "ArrowLeft":  goToFrame(state.current - 1); break;
+      case "ArrowRight": goToFrame(state.current + 1); break;
+      case "j": case "J": goToFrame(state.current - 10); break;
+      case "k": case "K": goToFrame(state.current + 10); break;
+      case "Home": goToFrame(0); break;
+      case "End":  goToFrame(state.frames.length - 1); break;
+      case "f": case "F":
+        state.view.fitToWindow = !state.view.fitToWindow;
+        $("t-fit").checked = state.view.fitToWindow; render(); break;
+      case "d": case "D":
+        setDepthEnabled(!state.depth.enabled); break;
+      case "m": case "M":
+        setDepthMode(state.depth.mode === "full" ? "bolls" : "full"); break;
+      case "0":
+        resetToFit(); break;
+      case "+": case "=":
+        $("speed-sel").selectedIndex = Math.min($("speed-sel").options.length - 1, $("speed-sel").selectedIndex + 1);
+        state.speed = parseFloat($("speed-sel").value); break;
+      case "-": case "_":
+        $("speed-sel").selectedIndex = Math.max(0, $("speed-sel").selectedIndex - 1);
+        state.speed = parseFloat($("speed-sel").value); break;
+    }
+  });
+
+  // Drag & drop folder
+  document.addEventListener("dragover", (e) => { e.preventDefault(); });
+  document.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const items = e.dataTransfer.items;
+    if (!items) return;
+    const entries = [];
+    const promises = [];
+    for (const it of items) {
+      const entry = it.webkitGetAsEntry?.();
+      if (entry) promises.push(walkEntry(entry, "", entries));
+    }
+    await Promise.all(promises);
+    if (entries.length) ingestEntries(entries, "frames");
+  });
+
+  // Window resize → re-fit
+  window.addEventListener("resize", () => { if (state.frames.length) render(); });
+
+  // Initial state
+  $("mask-alpha-v").textContent = state.view.maskAlpha.toFixed(2);
+  $("conf-min-v").textContent = state.filters.confMin.toFixed(2);
+  $("vis-min-v").textContent = state.filters.visMin.toFixed(2);
+  $("kpt-conf-min-v").textContent = state.filters.kptConfMin.toFixed(2);
+  $("trail-len-v").textContent = String(state.view.trailLen);
+}
+
+function walkEntry(entry, base, out) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((f) => {
+        out.push({ name: f.name, path: base + f.name, file: f });
+        resolve();
+      }, () => resolve());
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readAll = () => {
+        reader.readEntries(async (children) => {
+          if (!children.length) { resolve(); return; }
+          await Promise.all(children.map(c => walkEntry(c, base + entry.name + "/", out)));
+          readAll();
+        }, () => resolve());
+      };
+      readAll();
+    } else { resolve(); }
+  });
+}
+
+function showToast(msg, kind = "", timeout = 2200) {
+  toast.textContent = msg;
+  toast.className = "toast " + kind;
+  toast.style.display = "block";
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { toast.style.display = "none"; }, timeout);
+}
+function setLoading(frac) {
+  if (frac == null) { loadingBar.style.display = "none"; return; }
+  loadingBar.style.display = "block";
+  loadingBar.style.width = Math.round(Math.min(1, Math.max(0, frac)) * 100) + "%";
+}
+
+init();
+</script>
+</body>
+</html>
